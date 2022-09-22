@@ -9,3 +9,5 @@ The script needs as a command-line argument a JSON file containing seed nodes, e
 To fight fascism; in other words, to prevent, avoid, undermine, subvert, or negate the celebration of violence, domination, authoritarianism, and a "might makes right" ethos manifesting throughout society (but issuing more prominently in some places than others, such as chokepoint capitalism).
 
 More concretely, an "Antifascist Kubernetes Cluster" could be run over the wireguard network described above, and used to support projects for social reproduction, justice, learning, or creativity.
+
+Typically, k8s is run within a single data center, or multiple facilities that are geographically distributed, but linked via private, dedicated, high-bandwidth network connections. This architecture is great for the companies who own such infrastructure, but the benefits to consumers might not have always been explained with complete objectivity.
