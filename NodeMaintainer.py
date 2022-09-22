@@ -95,7 +95,7 @@ websocket_port = 51942
 wireguard_port = 51943
 local_timezone_offset = -5   # hours ahead of UTC
 gpg_home_dir = "/var/home/core/.gnupg"
-nameOfThisScript = "NodeMaintainer4_fedora.py"
+nameOfThisScript = "NodeMaintainer.py"
 
 # Default values are what seem sensible to me.
 target_wspingpong_bandwidth = 2   # upload bandwidth targets in KB/s
