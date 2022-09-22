@@ -6,8 +6,8 @@
 # comprised of the host VM and many other hosts accessible via the public
 # internet.
 
-#WIP - this should work correctly
-# in ubuntu 20.04 but I am planning to convert to FCOS
+#WIP - not really working code - I am in the process of converting something that
+#ran in ubuntu (works) into somehting that runs on FCOS (doesn't work yet)
 
 
 # Copyright (C) 2022  Cringey_Eisenstein
@@ -20,7 +20,7 @@
 # The last part of this file should contain version 3 of the GNU General Public License as published by the Free Software Foundation.
 
 
-# when used with Ubuntu 20.04, THE FOLLOWING STEPS SHOULD HAVE ALREADY HAPPENED:
+# when used with Fedora CoreOS, THE FOLLOWING STEPS SHOULD HAVE ALREADY HAPPENED:
 #sudo apt update; sudo apt install -y python3-pip; pip3 install pyOpenSSL --upgrade; sudo apt install -y python3.9
 #python3.9 -m pip install pyOpenSSL --upgrade; python3.9 -m pip install "tornado==6.2"; python3.9 -m pip install "ntplib==0.4.0"; python3.9 -m pip install "autobahn==22.7.1"; python3.9 -m pip install "websockets==10.3"
 #sudo apt install -y net-tools fwknop-server=2.6.10-8 fwknop-client=2.6.10-8 wireguard=1.0.20200513-1~20.04.2; sudo apt autoremove -y
@@ -37,7 +37,7 @@
 #gpg -a --export username_nodeN > username_nodeN.asc
 
 
-# when used with Ubuntu 20.04, the BELOW STEPS WILL BE DONE BY THE USER
+# when used with Fedora CoreOS, the BELOW STEPS WILL BE DONE BY THE USER
 # cat username_nodeN.asc
 # copy/paste it into the web interface
 # these ports need to be exposed to the internet for ingress
@@ -90,11 +90,12 @@ print("nodeFilePath: " + str(nodeFilePath))
 time.sleep(2)
 
 # You'll want to update these as needed.
-ipcheck_server = "http://12.34.5.678:8080/"
+ipcheck_server = "http://12.345.6.789:8080/"
 websocket_port = 51942
 wireguard_port = 51943
 local_timezone_offset = -5   # hours ahead of UTC
-gpg_home_dir = "/home/user/.gnupg"
+gpg_home_dir = "/var/home/core/.gnupg"
+nameOfThisScript = "NodeMaintainer4_fedora.py"
 
 # Default values are what seem sensible to me.
 target_wspingpong_bandwidth = 2   # upload bandwidth targets in KB/s
@@ -130,7 +131,7 @@ backupInterval = fwknopd_refresh_interval*2
 bandwidth_regulator_interval = 4  # seconds
 wireguardConfigFileName = "p2p-virtual-lan.conf"
 wg_bigconf_filename = "wg0.conf"
-commLogFile = "/home/user/commLog.txt"
+commLogFile = "commLog.txt"
 
 # Even less reason to tinker with these.
 actual_wspingpong_bandwidth = 0
@@ -148,6 +149,11 @@ total_icmp_bytes_sent = 1
 total_gossip_bytes_sent = 0
 continuous_ping_output = dict()
 healthyOverall = True
+
+thisScriptPath = os.path.realpath(__file__)
+my_regex = r"(.+)/" + re.escape(nameOfThisScript) + r"$"
+m1 = re.search(my_regex, thisScriptPath)
+containingDir = m1.group(1) if m1 else None
 
 
 # Specializing JSON object decoding
@@ -207,10 +213,10 @@ def ArchiveNode(fwknop_gpg_pubkey, nodevals):
 
 
 def GetHostIfaceName():
-    if not os.path.isdir("/tmp/NodeMaintainer_scratch"):
-        os.system("mkdir /tmp/NodeMaintainer_scratch/")
-    os.system("ifconfig -a > /tmp/NodeMaintainer_scratch/ifconfig_output.txt")
-    with open("/tmp/NodeMaintainer_scratch/ifconfig_output.txt") as file:
+    if not os.path.isdir(f"{containingDir}/NodeMaintainer_scratch"):
+        os.system(f"mkdir {containingDir}/NodeMaintainer_scratch/")
+    os.system(f"ifconfig -a > {containingDir}/NodeMaintainer_scratch/ifconfig_output.txt")
+    with open(f"{containingDir}/NodeMaintainer_scratch/ifconfig_output.txt") as file:
         for line in file:
             m1 = re.search('^(.+):\sflags=\d+<(.+)>\s+mtu\s.+$', line)
             if m1:
@@ -233,13 +239,13 @@ def gpg_is_installed():
 
 def GetGPG_fingerprints():
     temp_fingerprint_dict = dict()
-    os.system("rm /tmp/NodeMaintainer_scratch/*")
-    with open("/tmp/NodeMaintainer_scratch/keylist.txt", "w") as outfile:
+    os.system(f"rm {containingDir}/NodeMaintainer_scratch/*")
+    with open(f"{containingDir}/NodeMaintainer_scratch/keylist.txt", "w") as outfile:
         subprocess.run(["gpg", "--list-keys", "--with-colons"], stdout=outfile, stderr=subprocess.PIPE)
     pubFlag = False
     fingerprintFlag = False
     uid = None
-    with open("/tmp/NodeMaintainer_scratch/keylist.txt") as file:
+    with open(f"{containingDir}/NodeMaintainer_scratch/keylist.txt") as file:
         for line in file:
             m1 = re.search('pub', line)
             if m1:
@@ -263,11 +269,11 @@ def GetGPG_fingerprints():
 
 
 def GetGPG_pubkey(keyname):
-    with open("/tmp/NodeMaintainer_scratch/tempPubGpg.asc", "w") as outfile:
+    with open(f"{containingDir}/NodeMaintainer_scratch/tempPubGpg.asc", "w") as outfile:
         subprocess.run(["gpg", "--export", "-a", keyname], stdout=outfile, stderr=subprocess.PIPE)
-    cmd = "gpg --export -a " + keyname + " > /tmp/NodeMaintainer_scratch/tempPubGpg.asc"
+    cmd = "gpg --export -a " + keyname + f" > {containingDir}/NodeMaintainer_scratch/tempPubGpg.asc"
     print("executed: " + str(cmd))
-    with open("/tmp/NodeMaintainer_scratch/tempPubGpg.asc", 'r') as infile:
+    with open(f"{containingDir}/NodeMaintainer_scratch/tempPubGpg.asc", 'r') as infile:
         lines = infile.readlines()
         lines = [line.rstrip() for line in lines]
     concatKey = ""
@@ -294,9 +300,6 @@ def ConfigureFwknopd(node_dict=node_dict):
     global gpg_home_dir
     global gpg_lookup
     global keyname_lookup
-    thisScriptPath = os.path.realpath(__file__)
-    m1 = re.search('(.+)NodeMaintainer.py$', thisScriptPath)
-    containingDir = m1.group(1) if m1 else None
     for filename in os.listdir(containingDir):
         if filename[-4:] == ".asc":
             host_fwknopd_pubkey_name = filename[:-4]
@@ -310,14 +313,14 @@ def ConfigureFwknopd(node_dict=node_dict):
                 print("executed: " + cmd)
         i = 1
         for pubkey, nodeInfo in node_dict.items():
-            filepath = "/tmp/NodeMaintainer_scratch/node" + str(i) + ".asc"
+            filepath = f"{containingDir}/NodeMaintainer_scratch/node" + str(i) + ".asc"
             with open(filepath, 'w') as outfile:
                 outfile.write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
                 outfile.write('\n')
                 outfile.write(pubkey + '\n')
                 outfile.write('-----END PGP PUBLIC KEY BLOCK-----\n')
             i += 1
-        cmd = 'gpg --quiet --import /tmp/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
+        cmd = f'gpg --quiet --import {containingDir}/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
         subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print("executed: " + cmd)
         temp_fingerprint_dict = GetGPG_fingerprints()
@@ -325,7 +328,7 @@ def ConfigureFwknopd(node_dict=node_dict):
             pubkey = GetGPG_pubkey(keyname)
             gpg_lookup[pubkey] = (keyname, fingerprint)
             keyname_lookup[keyname] = (pubkey, fingerprint)
-        filepath = "/tmp/NodeMaintainer_scratch/sign_script.sh"
+        filepath = f"{containingDir}/NodeMaintainer_scratch/sign_script.sh"
         with open(filepath, 'w') as outfile:
             outfile.write("#!/bin/bash\n")
             for keyname, fingerprint in temp_fingerprint_dict.items():
@@ -343,23 +346,25 @@ def ConfigureFwknopd(node_dict=node_dict):
         sys.exit()
     if fwknop_is_installed():
         if host_iface_name:
-            os.system("cp /etc/fwknop/fwknopd.conf /etc/fwknop/fwknopd.conf.old")
-            os.system("head -n -1 /etc/fwknop/fwknopd.conf > /tmp/NodeMaintainer_scratch/tmp.txt")
-            for_appending = "PCAP_INTF                   " + host_iface_name + ";\n"
-            with open("/tmp/NodeMaintainer_scratch/tmp.txt", 'a') as outfile:
+            os.system("sudo -E cp /etc/fwknop/fwknopd.conf /etc/fwknop/fwknopd.conf.old")
+            os.system(f"sudo -E head -n -1 /etc/fwknop/fwknopd.conf > {containingDir}/NodeMaintainer_scratch/tmp.txt")
+            for_appending = "PCAP_INTF " + host_iface_name + ";\n"
+            with open(f"{containingDir}/NodeMaintainer_scratch/tmp.txt", 'a') as outfile:
                 outfile.write(for_appending)
-                outfile.write("VERBOSE                     3;\n")
+                outfile.write("VERBOSE 3;\n")
+                #outfile.write("FIREWALL_EXE                /usr/sbin/iptables;\n")
+                outfile.write("RULES_CHECK_THRESHOLD 400;\n")  # https://www.mail-archive.com/fwknop-discuss@lists.sourceforge.net/msg00883.html
                 outfile.write("##EOF###\n")
-            os.system("mv /tmp/NodeMaintainer_scratch/tmp.txt /etc/fwknop/fwknopd.conf")
-            os.system("chmod 0600 /etc/fwknop/fwknopd.conf")
-            os.system("mv /etc/fwknop/access.conf /etc/fwknop/access.conf.old")
+            os.system(f"sudo -E mv {containingDir}/NodeMaintainer_scratch/tmp.txt /etc/fwknop/fwknopd.conf")
+            os.system("sudo -E chmod 0600 /etc/fwknop/fwknopd.conf")
+            os.system("sudo -E mv /etc/fwknop/access.conf /etc/fwknop/access.conf.old")
             GPG_REMOTE_ID = ""
             for keyname, fingerprint in temp_fingerprint_dict.items():
                 if keyname != host_fwknopd_pubkey_name:
                     GPG_REMOTE_ID = GPG_REMOTE_ID + keyname + "," + fingerprint[-8:] + ","
             if len(GPG_REMOTE_ID) > 0:
                 GPG_REMOTE_ID = GPG_REMOTE_ID[:-1]
-            with open("/etc/fwknop/access.conf", 'w') as outfile:    # create new file /etc/fwknop/access.conf with the contents:
+            with open(f"{containingDir}/NodeMaintainer_scratch/fwknop_access.conf", 'w') as outfile:    # create new file fwknop_access.conf with the contents:
                 outfile.write("#stanza\n")
                 outfile.write("SOURCE      ANY\n")
                 t = "OPEN_PORTS      tcp/" + str(websocket_port) + ", udp/" + str(wireguard_port) + "\n"
@@ -376,22 +381,23 @@ def ConfigureFwknopd(node_dict=node_dict):
                 t = "GPG_REMOTE_ID       " + GPG_REMOTE_ID + "\n"
                 outfile.write(t)
                 outfile.write("#end stanza\n")
-            os.system("chmod 0600 /etc/fwknop/access.conf")
+            os.system(f"sudo -E cp {containingDir}/NodeMaintainer_scratch/fwknop_access.conf /etc/fwknop/access.conf")
+            os.system("sudo -E chmod 0600 /etc/fwknop/access.conf")
             # https://www.digitalocean.com/community/tutorials/how-to-use-fwknop-to-enable-single-packet-authentication-on-ubuntu-12-04
             # https://www.cipherdyne.org/fwknop/
             # (since the script is assumed to be running with sudo, we are omitting sudo from these commands)
             # First, we need to allow our current connection. This rule will allow already established connections and associated data:
-            cmd = "iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
             os.system(cmd)
-            cmd = "iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
             os.system(cmd)
             # Next, directly after, we’ll restrict all other access to the port by dropping all non-established connection attempts:
-            cmd = "iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -j DROP"
+            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -j DROP"
             os.system(cmd)
-            cmd = "iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -j DROP"
+            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -j DROP"
             os.system(cmd)
             # Now that we have a basic firewall restricting access to that port, we can implement our configuration. Restart the fwknop server by typing:
-            cmd = "service fwknop-server restart"
+            cmd = "sudo systemctl restart fwknopd"
             os.system(cmd)
             time.sleep(3)
             # Now, the fwknop service will begin monitoring our server for packets that match rules we configured.
@@ -636,7 +642,7 @@ sslcontext_forserver = ssl.SSLContext(ssl.PROTOCOL_TLS)
 sslcontext_forserver.load_cert_chain("autobahn_server.crt", "autobahn_server.key")
 print("loaded sslcontext_forserver")
 
-log_file_filename = '/home/user/Test_server.log'
+log_file_filename = 'Test_server.log'
 #logging.basicConfig(filename=log_file_filename, filemode='a', format='%(name)s - %(levelname)s - %(message)s')
 
 handler = logging.FileHandler(log_file_filename)
@@ -692,7 +698,7 @@ async def Maintain_backup_file_of_nodes(path, node_dict=node_dict):
 def PortKnock(gpg_keyname, destIP, sourceIP, port, protocol):
     global gpg_home_dir
     global host_fwknopd_pubkey_name
-    cmd = "fwknop -g --gpg-no-signing-pw --gpg-home-dir=" + gpg_home_dir + " -A " + protocol + "/" + str(port) + " --gpg-recipient=" + gpg_keyname + " --gpg-signer-key=" + host_fwknopd_pubkey_name + " -a " + sourceIP + " -D " + destIP
+    cmd = "sudo -E fwknop -g --gpg-no-signing-pw --gpg-home-dir=" + gpg_home_dir + " -A " + protocol + "/" + str(port) + " --gpg-recipient=" + gpg_keyname + " --gpg-signer-key=" + host_fwknopd_pubkey_name + " -a " + sourceIP + " -D " + destIP
     #print("PortKnock: " + cmd)
     #app_log.warning("PortKnock: " + cmd)
     CommLog(GetUTC_timestamp_as_datetime_synchronous(), "port_knock_outgoing", protocol, sourceIP, destIP, str(port))
@@ -895,16 +901,16 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
     global fwknopd_refresh_interval
     while True:
         print("Refresh_fwknopd")
-        temp_fingerprint_dict = GetGPG_fingerprints()                       # might need to remove these lines
-        for keyname, fingerprint in temp_fingerprint_dict.items():          # if clearing out gpg keys 
-            if keyname != host_fwknopd_pubkey_name:                         # disrupts existing websocket connections
+        temp_fingerprint_dict = GetGPG_fingerprints()
+        for keyname, fingerprint in temp_fingerprint_dict.items():
+            if keyname != host_fwknopd_pubkey_name:
                 subprocess.run(["gpg", "--quiet", "--batch", "--delete-keys", fingerprint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 cmd = 'gpg --quiet --batch --delete-keys ' + fingerprint    #
                 print("executed: " + cmd)                                   # here we are clearing out all the gpg keys EXCEPT for that of the host
         i = 1
         # recreate the .asc files for the current list of nodes
         for pubkey, nodeInfo in node_dict.items():
-            filepath = "/tmp/NodeMaintainer_scratch/node" + str(i) + ".asc"
+            filepath = f"{containingDir}/NodeMaintainer_scratch/node" + str(i) + ".asc"
             with open(filepath, 'w') as outfile:
                 outfile.write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
                 outfile.write('\n')
@@ -918,14 +924,14 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
         infile.close()
         for pubkey, nodeInfo in seed_dict.items():
             if pubkey not in node_dict:
-                filepath = "/tmp/NodeMaintainer_scratch/node" + str(i) + ".asc"
+                filepath = f"{containingDir}/NodeMaintainer_scratch/node" + str(i) + ".asc"
                 with open(filepath, 'w') as outfile:
                     outfile.write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
                     outfile.write('\n')
                     outfile.write(pubkey + '\n')
                     outfile.write('-----END PGP PUBLIC KEY BLOCK-----\n')
                 i += 1
-        cmd = 'gpg --quiet --import /tmp/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
+        cmd = f'gpg --quiet --import {containingDir}/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
         subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print("executed: " + str(cmd))
         temp_fingerprint_dict = GetGPG_fingerprints()
@@ -934,7 +940,7 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
             gpg_lookup[pubkey] = (keyname, fingerprint)
             keyname_lookup[keyname] = (pubkey, fingerprint)
         host_fwknopd_pubkey = keyname_lookup[host_fwknopd_pubkey_name][0]
-        filepath = "/tmp/NodeMaintainer_scratch/sign_script.sh"
+        filepath = f"{containingDir}/NodeMaintainer_scratch/sign_script.sh"
         with open(filepath, 'w') as outfile:
             outfile.write("#!/bin/bash\n")
             for keyname, fingerprint in temp_fingerprint_dict.items():
@@ -953,7 +959,7 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
                 GPG_REMOTE_ID = GPG_REMOTE_ID + keyname + "," + fingerprint[-8:] + ","
         if len(GPG_REMOTE_ID) > 0:
             GPG_REMOTE_ID = GPG_REMOTE_ID[:-1]
-        with open("/etc/fwknop/access.conf", 'w') as outfile:    # create new file /etc/fwknop/access.conf with the contents:
+        with open(f"{containingDir}/NodeMaintainer_scratch/fwknop_access.conf", 'w') as outfile:    # create new file fwknop_access.conf with the contents:
             outfile.write("#stanza\n")
             outfile.write("SOURCE      ANY\n")
             t = "OPEN_PORTS      tcp/" + str(websocket_port) + ", udp/" + str(wireguard_port) + "\n"
@@ -970,7 +976,9 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
             t = "GPG_REMOTE_ID       " + GPG_REMOTE_ID + "\n"
             outfile.write(t)
             outfile.write("#end stanza\n")
-        cmd = "service fwknop-server restart"
+        os.system(f"sudo -E cp {containingDir}/NodeMaintainer_scratch/fwknop_access.conf /etc/fwknop/access.conf")
+        os.system("sudo -E chmod 0600 /etc/fwknop/access.conf")
+        cmd = "sudo systemctl restart fwknopd"
         os.system(cmd)
         await asyncio.sleep(fwknopd_refresh_interval)
 
@@ -1085,12 +1093,18 @@ async def BroadcastHeartbeat(node_dict):
                         heartbeatContent["wg_pubkey"] = myWireguardPublicKey
                         heartbeatContent_s = json.dumps(heartbeatContent, cls=TimestampEncoder)
                         await node_dict[k]["wsclient"].websocket.send(heartbeatContent_s)
+                        print()
+                        print(heartbeatContent_s)
+                        print()
                         CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_heartbeat_outgoing", "WSS", host_externalIP, node_dict[k]["internetIP"], "?")
                         total_gossip_bytes_sent += len(heartbeatContent_s)   # seems safe to assume utf8 will in this scenario almost always be 1 byte per character
                     except Exception as e:
                         print("BroadcastHeartbeat failed to send heartbeat to one of the nodes:")
-                        print(e)
-                        CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_heartbeat_outgoing_ERR", "WSS", host_externalIP, "?", "?")
+                        exception_s = str(e)
+                        exception_s = exception_s.replace('\n', ' ').replace('\r', ' ')
+                        m = "WSS " + exception_s
+                        print(exception_s)
+                        CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_heartbeat_outgoing_ERR", m, host_externalIP, "?", "?")
                         await asyncio.sleep(2)
             await AsyncResponsiveSleep("heartbeatInterval")
         except Exception as e:
@@ -1824,11 +1838,11 @@ def RestartWholeComputer():
     os.system("rm $HOME/autobahn_server.key")
     os.system("rm $HOME/autobahn_server.csr")
     os.system("rm $HOME/autobahn_server.crt")
-    os.system("mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
-    os.system("mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
-    os.system("iptables -F")
+    os.system("sudo -E mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
+    os.system("sudo -E mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
+    os.system("sudo -E iptables -F")
     print("restarting whole computer goodbye")
-    os.system("shutdown -r now")
+    os.system("sudo shutdown -r now")
 
 
 async def main():
@@ -1864,9 +1878,9 @@ async def main():
         os.system("rm $HOME/autobahn_server.key")
         os.system("rm $HOME/autobahn_server.csr")
         os.system("rm $HOME/autobahn_server.crt")
-        os.system("mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
-        os.system("mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
-        os.system("iptables -F")
+        os.system("sudo -E mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
+        os.system("sudo -E mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
+        os.system("sudo -E iptables -F")
         scriptShouldBeRunning = False
         print("done cleaning up.")
         shutdown_event.set()
