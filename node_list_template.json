@@ -1,0 +1,11 @@
+{
+    "mQENBGNjU8[node1 gpg pubkey goes here]": {
+        "internetIP": "ip.addr.of.node1"
+    },
+    "mQENBGNjU+[node2 gpg pubkey goes here]": {
+        "internetIP": "ip.addr.of.node2"
+    },
+    "mQENBGNjVR[node3 gpg pubkey goes here]": {
+        "internetIP": "ip.addr.of.node3.node.list.need.not.be.exhaustive.as.long.as.it.has.some.seeds.it.should.fill.in.automatically"
+    }
+}
