@@ -6,10 +6,6 @@
 # comprised of the host VM and many other hosts accessible via the public
 # internet.
 
-#WIP - not really working code - I am in the process of converting something that
-#ran in ubuntu (works) into somehting that runs on FCOS (doesn't work yet)
-
-
 # Copyright (C) 2022  Cringey_Eisenstein
 # "nolite te bastardes carborundorum"
 
@@ -20,10 +16,12 @@
 # The last part of this file should contain version 3 of the GNU General Public License as published by the Free Software Foundation.
 
 
-# when used with Fedora CoreOS, THE FOLLOWING STEPS SHOULD HAVE ALREADY HAPPENED:
-#sudo apt update; sudo apt install -y python3-pip; pip3 install pyOpenSSL --upgrade; sudo apt install -y python3.9
-#python3.9 -m pip install pyOpenSSL --upgrade; python3.9 -m pip install "tornado==6.2"; python3.9 -m pip install "ntplib==0.4.0"; python3.9 -m pip install "autobahn==22.7.1"; python3.9 -m pip install "websockets==10.3"
-#sudo apt install -y net-tools fwknop-server=2.6.10-8 fwknop-client=2.6.10-8 wireguard=1.0.20200513-1~20.04.2; sudo apt autoremove -y
+# when used with Ubuntu 22.04, THE FOLLOWING STEPS SHOULD HAVE ALREADY HAPPENED:
+
+#sudo apt update; sudo apt install -y python3-pip; pip3 install pyOpenSSL --upgrade
+#python3 -m pip install pyOpenSSL --upgrade; python3 -m pip install "tornado==6.2"; python3 -m pip install "ntplib==0.4.0"; python3 -m pip install "autobahn==22.7.1"; python3 -m pip install "websockets==10.3"
+#sudo apt install -y net-tools fwknop-server=2.6.10-13build1 fwknop-client=2.6.10-13build1 wireguard=1.0.20210914-1ubuntu2; sudo apt autoremove -y
+
 #gpg --full-generate-key
    #Select (1) RSA and RSA (default)
    #What keysize do you want? (3072) 2048    #fwknop does not like larger than 2048
@@ -37,15 +35,20 @@
 #gpg -a --export username_nodeN > username_nodeN.asc
 
 
-# when used with Fedora CoreOS, the BELOW STEPS WILL BE DONE BY THE USER
+# when used with Ubuntu 22.04, the BELOW STEPS WILL BE DONE BY THE USER
 # cat username_nodeN.asc
 # copy/paste it into the web interface
+# download node_file.json and transfer it to the VM -- to the same directory as this script
+# update lines 102-106 of this script, as needed
 # these ports need to be exposed to the internet for ingress
 # tcp/websocket_port
 # udp/wireguard_port
 # udp/62201
 
-# sudo -E python3.9 NodeMaintainer4.py [node_file.json]
+# tmux
+# python3.9 NodeMaintainer.py [node_file.json] [$HOME/.gnupg]
+# detach from tmux
+# install k3s
 
 import os
 import os.path
@@ -80,21 +83,26 @@ import ipaddress
 
 
 nodeFilePath = "nodes_small.json"
+gpg_home_dir = "/home/user/.gnupg"
 
-if len(sys.argv) == 2:
+if len(sys.argv) >= 2:
     temp = str(sys.argv[1])
     if os.path.isfile(temp):
         nodeFilePath = temp
+if len(sys.argv) == 3:
+    temp = str(sys.argv[2])
+    if os.path.isdir(temp):
+        gpg_home_dir = temp
+
 
 print("nodeFilePath: " + str(nodeFilePath))
 time.sleep(2)
 
-# You'll want to update these as needed.
-ipcheck_server = "http://12.345.6.789:8080/"
+# You'll want to UPDATE THESE as needed.
+ipcheck_server = "http://34.171.3.165:8080/"
 websocket_port = 51942
 wireguard_port = 51943
 local_timezone_offset = -5   # hours ahead of UTC
-gpg_home_dir = "/var/home/core/.gnupg"
 nameOfThisScript = "NodeMaintainer.py"
 
 # Default values are what seem sensible to me.
@@ -143,7 +151,7 @@ bigwindow_gossip_bandwidth = 0
 wireguardStartCount = 0
 gpg_lookup = dict()
 keyname_lookup = dict()
-historical_byteAndTimestampStats=deque()
+historical_byteAndTimestampStats = deque()
 total_wspingpong_bytes_sent = 0
 total_icmp_bytes_sent = 1
 total_gossip_bytes_sent = 0
@@ -352,8 +360,6 @@ def ConfigureFwknopd(node_dict=node_dict):
             with open(f"{containingDir}/NodeMaintainer_scratch/tmp.txt", 'a') as outfile:
                 outfile.write(for_appending)
                 outfile.write("VERBOSE 3;\n")
-                #outfile.write("FIREWALL_EXE                /usr/sbin/iptables;\n")
-                outfile.write("RULES_CHECK_THRESHOLD 400;\n")  # https://www.mail-archive.com/fwknop-discuss@lists.sourceforge.net/msg00883.html
                 outfile.write("##EOF###\n")
             os.system(f"sudo -E mv {containingDir}/NodeMaintainer_scratch/tmp.txt /etc/fwknop/fwknopd.conf")
             os.system("sudo -E chmod 0600 /etc/fwknop/fwknopd.conf")
@@ -385,21 +391,22 @@ def ConfigureFwknopd(node_dict=node_dict):
             os.system("sudo -E chmod 0600 /etc/fwknop/access.conf")
             # https://www.digitalocean.com/community/tutorials/how-to-use-fwknop-to-enable-single-packet-authentication-on-ubuntu-12-04
             # https://www.cipherdyne.org/fwknop/
-            # (since the script is assumed to be running with sudo, we are omitting sudo from these commands)
             # First, we need to allow our current connection. This rule will allow already established connections and associated data:
-            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+            cmd = "sudo iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
             os.system(cmd)
-            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+            cmd = "sudo iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
             os.system(cmd)
             # Next, directly after, we’ll restrict all other access to the port by dropping all non-established connection attempts:
-            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -j DROP"
+            cmd = "sudo iptables -A INPUT -i " + host_iface_name + " -p tcp --dport " + str(websocket_port) + " -j DROP"
             os.system(cmd)
-            cmd = "sudo -E iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -j DROP"
+            cmd = "sudo iptables -A INPUT -i " + host_iface_name + " -p udp --dport " + str(wireguard_port) + " -j DROP"
             os.system(cmd)
             # Now that we have a basic firewall restricting access to that port, we can implement our configuration. Restart the fwknop server by typing:
-            cmd = "sudo systemctl restart fwknopd"
+            cmd = "sudo service fwknop-server restart"
+            print("Waiting 5 seconds to let fwknopd finish startup...")
             os.system(cmd)
-            time.sleep(3)
+            time.sleep(5)
+            print("Done waiting.")
             # Now, the fwknop service will begin monitoring our server for packets that match rules we configured.
         else:
             print("could not find this machine's network interface name; terminating script")
@@ -456,8 +463,8 @@ async def GetUTC_timestamp_as_datetime() -> datetime:
     theTime = None
     global offsetFromInternetTime
     nineteenSeventy = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    t_sys=datetime.now(tz=timezone.utc)
-    t_sys_seconds=t_sys.timestamp()
+    t_sys = datetime.now(tz=timezone.utc)
+    t_sys_seconds = t_sys.timestamp()
     t_seconds = t_sys_seconds - offsetFromInternetTime
     timeDeltaSinceNineteenSeventy = timedelta(seconds=t_seconds)
     theTime = nineteenSeventy + timeDeltaSinceNineteenSeventy
@@ -469,8 +476,8 @@ def GetUTC_timestamp_as_datetime_synchronous() -> datetime:
     theTime = None
     global offsetFromInternetTime
     nineteenSeventy = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    t_sys=datetime.now(tz=timezone.utc)
-    t_sys_seconds=t_sys.timestamp()
+    t_sys = datetime.now(tz=timezone.utc)
+    t_sys_seconds = t_sys.timestamp()
     t_seconds = t_sys_seconds - offsetFromInternetTime
     timeDeltaSinceNineteenSeventy = timedelta(seconds=t_seconds)
     theTime = nineteenSeventy + timeDeltaSinceNineteenSeventy
@@ -490,8 +497,8 @@ def GetHostInternetIP() -> str:
 
 
 def CheckConfigFileForPresets(wireguardConfigFileName) -> tuple:
-    privatekey=None
-    ip=None
+    privatekey = None
+    ip = None
     if os.path.exists(wireguardConfigFileName):
         with open(wireguardConfigFileName, "r") as f:
             content = f.read()
@@ -566,6 +573,7 @@ async def SelfAssignWireguardIP_collision_allowed() -> str:
 
 
 async def FirstWireguardThings():
+    global host_externalIP
     enclosingDir = os.path.dirname(os.path.realpath(__file__))
     wg_bigconf_path = enclosingDir + "/wg0.conf"
     if os.path.exists(wg_bigconf_path):
@@ -574,7 +582,7 @@ async def FirstWireguardThings():
     global wgPrivateKey
     global offsetFromInternetTime
     wgPrivateKey, pub = await WG_first_steps()
-    a = GetHostInternetIP()
+    host_externalIP = GetHostInternetIP()
     b = await SelfAssignWireguardIP_collision_allowed()
     offsetFromInternetTime = CalcTimeOffset()
     #print("almost done with FirstWireguardThings() ")  # shows up at very beginning of stdout
@@ -698,8 +706,13 @@ async def Maintain_backup_file_of_nodes(path, node_dict=node_dict):
 def PortKnock(gpg_keyname, destIP, sourceIP, port, protocol):
     global gpg_home_dir
     global host_fwknopd_pubkey_name
-    cmd = "sudo -E fwknop -g --gpg-no-signing-pw --gpg-home-dir=" + gpg_home_dir + " -A " + protocol + "/" + str(port) + " --gpg-recipient=" + gpg_keyname + " --gpg-signer-key=" + host_fwknopd_pubkey_name + " -a " + sourceIP + " -D " + destIP
-    #print("PortKnock: " + cmd)
+    try:
+        assert (gpg_home_dir and host_fwknopd_pubkey_name and gpg_keyname and len(destIP)>4 and len(sourceIP)>4 and len(str(port))>0 and len(protocol)>2), f"gpg_home_dir: {gpg_home_dir}, host_fwknopd_pubkey_name: {host_fwknopd_pubkey_name}, gpg_keyname: {gpg_keyname}, destIP: {destIP}, sourceIP: {sourceIP}, port: {port}, protocol: {protocol}"
+    except Exception as e:
+        print(e)
+        time.sleep(10)
+    cmd = "sudo fwknop -g --gpg-no-signing-pw --gpg-home-dir=" + gpg_home_dir + " --access=" + protocol + "/" + str(port) + " --gpg-recipient=" + gpg_keyname + " --gpg-signer-key=" + host_fwknopd_pubkey_name + " --allow-ip=" + sourceIP + " --destination=" + destIP + " --fw-timeout=90"
+    print("PortKnock: " + cmd)
     #app_log.warning("PortKnock: " + cmd)
     CommLog(GetUTC_timestamp_as_datetime_synchronous(), "port_knock_outgoing", protocol, sourceIP, destIP, str(port))
     os.system(cmd)
@@ -730,12 +743,15 @@ class CustomWebsocketClient:
 
     async def start(self):    # https://websockets.readthedocs.io/en/stable/intro/quickstart.html
         try:
+            await asyncio.sleep(aFewSecs(8,10))
             self.websocket = await websockets.connect(self.url, ssl=self.sslclientcontext)   # Connect to wss://destIP:wsport
             self.incoming_message_task = asyncio.create_task(self.wait_for_incoming())   # Set up a "background" task for further streaming reads of the web socket
             CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_handshake_outgoing", "WSS", host_externalIP, self.destIP, self.wsport)
             return True
-        except:
+        except Exception as e:
             CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_handshake_outgoing_ERR", "WSS", host_externalIP, self.destIP, self.wsport)
+            print(e)
+            time.sleep(5)
             return False   # Connection failed (or some unexpected error)
 
     async def wait_for_incoming(self):
@@ -766,7 +782,7 @@ async def OpenWebsocketClientConnectionToNode(gpg_keyname, destIP, sourceIP, nod
     if gpg_keyname != host_fwknopd_pubkey_name:
         try:
             PortKnock(gpg_keyname, destIP, sourceIP, websocket_port, "tcp")
-            time.sleep(1)
+            time.sleep(5)
             fwknop_pubkey=keyname_lookup[gpg_keyname][0]
             new_ws_client_instance = CustomWebsocketClient(destIP=destIP, wsport=websocket_port, fwknop_pubkey=fwknop_pubkey, node_dict=node_dict)
             t = asyncio.create_task(new_ws_client_instance.start())
@@ -978,8 +994,11 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
             outfile.write("#end stanza\n")
         os.system(f"sudo -E cp {containingDir}/NodeMaintainer_scratch/fwknop_access.conf /etc/fwknop/access.conf")
         os.system("sudo -E chmod 0600 /etc/fwknop/access.conf")
-        cmd = "sudo systemctl restart fwknopd"
+        cmd = "sudo service fwknop-server restart"
+        print("Waiting 20 seconds to let fwknopd restart...")
         os.system(cmd)
+        time.sleep(20)
+        print("Done waiting.")
         await asyncio.sleep(fwknopd_refresh_interval)
 
 
@@ -1624,6 +1643,7 @@ class MyServerProtocol(WebSocketServerProtocol):
 async def maintainIP(node_dict):
     global host_externalIP
     global host_fwknopd_pubkey
+    #while True: #not sure if I left this out by mistake?
     host_externalIP = GetHostInternetIP()
     node_dict[host_fwknopd_pubkey]["internetIP"] = host_externalIP
     await asyncio.sleep(180 + aFewSecs(1,3))
@@ -1707,6 +1727,7 @@ async def StartWireguard(node_dict):
             if (k != host_fwknopd_pubkey) and (k in gpg_lookup):
                 PortKnock(gpg_lookup[k][0], v["internetIP"], host_externalIP, wireguard_port, "udp")
 
+        await asyncio.sleep(aFewSecs(8,10))
         subprocess.run(["sudo", "ip", "link", "set", "up", "dev", "wg0"], capture_output=True, text=True)
         subprocess.run(["sudo", "ip", "route", "add", "10.0.0.0/8", "dev", "wg0"], capture_output=True, text=True)
         wireguardStartCount += 1
@@ -1838,9 +1859,9 @@ def RestartWholeComputer():
     os.system("rm $HOME/autobahn_server.key")
     os.system("rm $HOME/autobahn_server.csr")
     os.system("rm $HOME/autobahn_server.crt")
-    os.system("sudo -E mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
-    os.system("sudo -E mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
-    os.system("sudo -E iptables -F")
+    os.system("sudo mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
+    os.system("sudo mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
+    os.system("sudo iptables -F")
     print("restarting whole computer goodbye")
     os.system("sudo shutdown -r now")
 
@@ -1880,7 +1901,7 @@ async def main():
         os.system("rm $HOME/autobahn_server.crt")
         os.system("sudo -E mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
         os.system("sudo -E mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
-        os.system("sudo -E iptables -F")
+        os.system("sudo iptables -F")
         scriptShouldBeRunning = False
         print("done cleaning up.")
         shutdown_event.set()
