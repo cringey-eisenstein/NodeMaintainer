@@ -140,6 +140,13 @@ bandwidth_regulator_interval = 4  # seconds
 wireguardConfigFileName = "p2p-virtual-lan.conf"
 wg_bigconf_filename = "wg0.conf"
 commLogFile = "commLog.txt"
+meshStatsLogFile = "meshStatsLog.csv"
+
+if not os.path.isfile(meshStatsLogFile):
+    outfile = open(meshStatsLogFile, "a")
+    line = "timestamp,nonarchived nodes (num),nonarchived nodes with lastPongWS (num),nonarchived nodes with ICMPreceived (num),send gossip data rate (KB/s) short window,send gossip data rate (KB/s) long window,gossip dampen,gossip undampen,nodeDecrement (num nodes),nodeIncrement (num nodes),nodeSampleSize (num nodes),websocket stale threshold (s),wireguard stale threshold (s),heartbeatInterval (s),wireguard start count\n"
+    outfile.write(line)
+    outfile.close()
 
 # Even less reason to tinker with these.
 actual_wspingpong_bandwidth = 0
@@ -344,7 +351,7 @@ def ConfigureFwknopd(node_dict=node_dict):
             outfile.write("#!/bin/bash\n")
             for keyname, fingerprint in temp_fingerprint_dict.items():
                 if keyname != host_fwknopd_pubkey_name:
-                    cmd = 'echo -e "y\nsave\n" | gpg --command-fd 0 --edit-key ' + keyname + ' sign'
+                    cmd = 'echo -e "y\nsave\n" | sudo -E gpg --command-fd 0 --edit-key ' + keyname + ' sign'
                     c2 = cmd.encode('unicode_escape').decode()
                     outfile.write(c2)
                     outfile.write("\n")
@@ -545,16 +552,6 @@ cat publickey
     return (privatekey, publickey)
 
 
-#async def GenerateRandomIP4addr() -> str:
-#    placeholderVar, ip = CheckConfigFileForPresets(wireguardConfigFileName)
-#    if not ip:
-#        a = 10
-#        b = random.randint(0,255)
-#        c = random.randint(0,255)
-#        d = random.randint(0,255)
-#        ip = str(a) + "." + str(b) + "." + str(c) + "." + str(d)
-#    return ip
-
 async def GenerateRandomIP4addr() -> str:
     placeholderVar, ip = CheckConfigFileForPresets(wireguardConfigFileName)
     #198.18.0.0/15 is 131072 IPv4 addresses reserved for benchmark testing of inter-network communications between two separate subnets.
@@ -666,18 +663,18 @@ sslcontext_forserver = ssl.SSLContext(ssl.PROTOCOL_TLS)
 sslcontext_forserver.load_cert_chain("autobahn_server.crt", "autobahn_server.key")
 print("loaded sslcontext_forserver")
 
-log_file_filename = 'Test_server.log'
+#log_file_filename = 'Test_server.log'
 #logging.basicConfig(filename=log_file_filename, filemode='a', format='%(name)s - %(levelname)s - %(message)s')
 
-handler = logging.FileHandler(log_file_filename)
+#handler = logging.FileHandler(log_file_filename)
 app_log = logging.getLogger("tornado.application")
 access_log = logging.getLogger("tornado.access")
 gen_log = logging.getLogger("tornado.general")
 
-enable_pretty_logging()
-app_log.addHandler(handler)
-access_log.addHandler(handler)
-gen_log.addHandler(handler)
+#enable_pretty_logging()
+#app_log.addHandler(handler)
+#access_log.addHandler(handler)
+#gen_log.addHandler(handler)
 
 
 #Extending JSONEncoder
@@ -828,7 +825,7 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
             for fwknop_gpg_pubkey, nodeValues in node_dict.items():
                 current_time = await GetUTC_timestamp_as_datetime()
                 #print("nodeValues: " + str(nodeValues))
-                print("line 828")
+                #print("line 828")
                 if "wsclient" in nodeValues:
                     print("wsclient in nodeValues")
                     if "lastPing" not in nodeValues:
@@ -836,17 +833,17 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                         try:
                             CommLog(current_time, "wss_ping_outgoing", "WSS", host_externalIP, nodeValues["internetIP"], "?")  #print("line 710")
                             await nodeValues["wsclient"].websocket.send("ping")
-                            print("line 836")
+                            #print("line 836")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            print("line 838")
+                            #print("line 838")
                             total_wspingpong_bytes_sent += 4
-                            print("line 840")
+                            #print("line 840")
                         except Exception as e:
                             #print(e)
                             #print("assigning a lastPing anyway, despite exception")
-                            print("line 844")
+                            #print("line 844")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            print("line 846")
+                            #print("line 846")
                         continue
                     elif "lastPong" not in nodeValues:
                         print("stale based on absent pong so flushing")
@@ -878,14 +875,14 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                             await nodeValues["wsclient"].websocket.send("ping")
                             CommLog(current_time, "wss_ping_outgoing", "WSS", host_externalIP, nodeValues["internetIP"], "?")  #print("line 740")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            print("line 878")
+                            #print("line 878")
                             total_wspingpong_bytes_sent += 4
-                            print("line 880")
+                            #print("line 880")
                         except Exception as e:
                             #print(e)
                             #print("assigning a lastPing anyway, despite exception")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            print("line 885")
+                            #print("line 885")
                         continue
                 elif (fwknop_gpg_pubkey in gpg_lookup):
                     if gpg_lookup[fwknop_gpg_pubkey][0] != host_fwknopd_pubkey_name:    # note this only works of the pubkey names are very unique, which they will be
@@ -912,10 +909,9 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                         print("we FINISHED CALLING OpenWebsocketClientConnectionToNode")
                 else:
                     print("we are doing nothing for some reason.")
-                    print(fwknop_gpg_pubkey)
-                    print(str(gpg_lookup))
-                    print("maybe the above will explain why we are doing nothing")
-                    #WIP looks like all the keys are different except for the host's so there is is never a match w prev condition
+                    #print(fwknop_gpg_pubkey)
+                    #print(str(gpg_lookup))
+                    #print("maybe the above will explain why we are doing nothing")
             #print(node_dict)
             #print()
         except Exception as e:
@@ -992,7 +988,7 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
             outfile.write("#!/bin/bash\n")
             for keyname, fingerprint in temp_fingerprint_dict.items():
                 if keyname != host_fwknopd_pubkey_name:
-                    cmd = 'echo -e "y\nsave\n" | gpg --command-fd 0 --edit-key ' + keyname + ' sign'
+                    cmd = 'echo -e "y\nsave\n" | sudo -E gpg --command-fd 0 --edit-key ' + keyname + ' sign'
                     c2 = cmd.encode('unicode_escape').decode()
                     outfile.write(c2)
                     outfile.write("\n")
@@ -1443,11 +1439,15 @@ async def display_node_dict(node_dict):
 
     while True:
         #clear()
+        numNonarchivedNodes = 0
+        numNonarchivedNodesWithLastPongWS = 0
+        numNonarchivedNodesWithICMPreceived = 0
         keys = node_dict.keys()
         keys_s = sorted(keys)
         #print("display_node_dict id(node_dict)= " + str(id(node_dict)))
         print("..key   internetIP   lastPingWS   lastPongWS   ..wgkey  wg_ip  ICMPsent   ICMPrecvd")
         for k in keys_s:
+            numNonarchivedNodes += 1
             k_short = "..." + str(k[-5:])
             wk_short = "None"
             vals = node_dict[k]
@@ -1465,6 +1465,7 @@ async def display_node_dict(node_dict):
 
             try:
                 lPong = vals["lastPong"].strftime("%Y-%m-%d %H:%M:%S.%f")
+                numNonarchivedNodesWithLastPongWS += 1
             except:
                 msg = "display_node_dict missing lPong"
                 #print(msg)
@@ -1496,6 +1497,7 @@ async def display_node_dict(node_dict):
 
             try:
                 icmpR = vals["last_wg_icmp_receive_timestamp"].strftime("%Y-%m-%d %H:%M:%S.%f")
+                numNonarchivedNodesWithICMPreceived += 1
             except Exception as e:
                 msg = "display_node_dict missing icmpR"
                 #print(msg)
@@ -1549,7 +1551,27 @@ async def display_node_dict(node_dict):
         if icmprecv_ts_mismatch_flag:
             print("out-of-sync: timestamp for icmp received")
 
-        await asyncio.sleep(8)
+        entry_timestamp_dt = await GetUTC_timestamp_as_datetime() 
+        entry_timestamp = entry_timestamp_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+        line = entry_timestamp + "," + str(numNonarchivedNodes) + "," +\
+            str(numNonarchivedNodesWithLastPongWS) + "," +\
+            str(numNonarchivedNodesWithICMPreceived) + "," +\
+            "{:.2f}".format(actual_gossip_bandwidth) + "," +\
+            "{:.2f}".format(bigwindow_gossip_bandwidth) + "," +\
+            "{:.2f}".format(gossip_dampenFactor) + "," +\
+            "{:.2f}".format(gossip_undampenFactor) + "," +\
+            "{:.3f}".format(nodeDecrement) + "," +\
+            "{:.3f}".format(nodeIncrement) + "," +\
+            str(nodeSampleSize) + "," +\
+            "{:.2f}".format(websocket_stale_threshold) + "," +\
+            "{:.2f}".format(wireguard_stale_threshold) + "," +\
+            "{:.2f}".format(dict_of_intervals["heartbeatInterval"]) + "," +\
+            str(wireguardStartCount) + "\n"
+        outfile = open(meshStatsLogFile, "a")
+        outfile.write(line)
+        outfile.close()
+
+        await asyncio.sleep(10)
         print()
 
 
@@ -1683,8 +1705,6 @@ async def maintainIP(node_dict):
 async def IPcollision(addr, node_dict=node_dict) -> bool: 
     print("testing for IPcollision")
     # check whether addr already exists on wireguard virtual LAN
-    if addr == "10.0.0.0":
-        return True
     for k, v in node_dict.items():
         if k != host_fwknopd_pubkey:
             if "wg_ip" in v:
@@ -1700,10 +1720,14 @@ async def SelfAssignWireguardIP() -> str:
         while await IPcollision(addr=preAns):
             preAns = str(ipaddress.ip_address(preAns) + 1)
             #print("SelfAssignWireguardIP finding an available IP one at a time. trying " + preAns + "\n")
+            if preAns == "198.20.0.0":  # in the unlikely case where we go above the upper limit of 198.19.255.255...
+                preAns = "198.18.0.0"   # ...start over at the lower limit
         return preAns
     while await IPcollision(addr=preAns):
         preAns = str(ipaddress.ip_address(preAns) + 1)
         #print("SelfAssignWireguardIP finding an available IP one at a time. trying " + preAns + "\n")
+        if preAns == "198.20.0.0":  # in the unlikely case where we go above the upper limit of 198.19.255.255...
+            preAns = "198.18.0.0"   # ...start over at the lower limit
     return preAns
 
 
@@ -1949,7 +1973,6 @@ if __name__ == "__main__":
                                                     # but now this script isn't doing anything with
                                                     # a tornado server, so it doesn't make sense
                                                     # but it works
-
 
 
 # GNU GENERAL PUBLIC LICENSE
