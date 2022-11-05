@@ -46,7 +46,7 @@
 # udp/62201
 
 # tmux
-# python3.9 NodeMaintainer.py [node_file.json] [$HOME/.gnupg]
+# python3 NodeMaintainer.py [node_file.json] [$HOME/.gnupg]
 # detach from tmux
 # install k3s
 
@@ -316,22 +316,25 @@ def ConfigureFwknopd(node_dict=node_dict):
         temp_fingerprint_dict = GetGPG_fingerprints()
         for keyname, fingerprint in temp_fingerprint_dict.items():
             if keyname != host_fwknopd_pubkey_name:
-                subprocess.run(["gpg", "--quiet", "--batch", "--delete-keys", fingerprint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                cmd = 'gpg --quiet --batch --delete-keys ' + fingerprint
+                subprocess.run(["sudo", "-E", "gpg", "--quiet", "--batch", "--delete-keys", fingerprint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                cmd = 'sudo -E gpg --quiet --batch --delete-keys ' + fingerprint
                 print("executed: " + cmd)
         i = 1
         for pubkey, nodeInfo in node_dict.items():
-            filepath = f"{containingDir}/NodeMaintainer_scratch/node" + str(i) + ".asc"
+            filepath = f"{containingDir}/NodeMaintainer_scratch/reserved_temp_pubkey_filename" + str(i) + ".asc"
             with open(filepath, 'w') as outfile:
                 outfile.write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
                 outfile.write('\n')
                 outfile.write(pubkey + '\n')
                 outfile.write('-----END PGP PUBLIC KEY BLOCK-----\n')
             i += 1
-        cmd = f'gpg --quiet --import {containingDir}/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
+        cmd = f'sudo -E gpg --quiet --import {containingDir}/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
         subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print("executed: " + cmd)
+        #time.sleep(20)
         temp_fingerprint_dict = GetGPG_fingerprints()
+        print("temp_fingerprint_dict:  " + str(temp_fingerprint_dict))
+        time.sleep(5)
         for keyname, fingerprint in temp_fingerprint_dict.items():
             pubkey = GetGPG_pubkey(keyname)
             gpg_lookup[pubkey] = (keyname, fingerprint)
@@ -542,11 +545,24 @@ cat publickey
     return (privatekey, publickey)
 
 
+#async def GenerateRandomIP4addr() -> str:
+#    placeholderVar, ip = CheckConfigFileForPresets(wireguardConfigFileName)
+#    if not ip:
+#        a = 10
+#        b = random.randint(0,255)
+#        c = random.randint(0,255)
+#        d = random.randint(0,255)
+#        ip = str(a) + "." + str(b) + "." + str(c) + "." + str(d)
+#    return ip
+
 async def GenerateRandomIP4addr() -> str:
     placeholderVar, ip = CheckConfigFileForPresets(wireguardConfigFileName)
+    #198.18.0.0/15 is 131072 IPv4 addresses reserved for benchmark testing of inter-network communications between two separate subnets.
+    #https://en.wikipedia.org/wiki/Reserved_IP_addresses
+    #So it should be fine for AFKS to use for the time being until IPv6.
     if not ip:
-        a = 10
-        b = random.randint(0,255)
+        a = 198
+        b = random.randint(18,19)
         c = random.randint(0,255)
         d = random.randint(0,255)
         ip = str(a) + "." + str(b) + "." + str(c) + "." + str(d)
@@ -711,7 +727,7 @@ def PortKnock(gpg_keyname, destIP, sourceIP, port, protocol):
     except Exception as e:
         print(e)
         time.sleep(10)
-    cmd = "sudo fwknop -g --gpg-no-signing-pw --gpg-home-dir=" + gpg_home_dir + " --access=" + protocol + "/" + str(port) + " --gpg-recipient=" + gpg_keyname + " --gpg-signer-key=" + host_fwknopd_pubkey_name + " --allow-ip=" + sourceIP + " --destination=" + destIP + " --fw-timeout=90"
+    cmd = "sudo fwknop -g --gpg-no-signing-pw --gpg-home-dir=" + gpg_home_dir + " --access=" + protocol + "/" + str(port) + " --gpg-recipient=" + gpg_keyname + " --gpg-signer-key=" + host_fwknopd_pubkey_name + " --allow-ip=" + sourceIP + " --destination=" + destIP + " --fw-timeout=45"
     print("PortKnock: " + cmd)
     #app_log.warning("PortKnock: " + cmd)
     CommLog(GetUTC_timestamp_as_datetime_synchronous(), "port_knock_outgoing", protocol, sourceIP, destIP, str(port))
@@ -812,79 +828,94 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
             for fwknop_gpg_pubkey, nodeValues in node_dict.items():
                 current_time = await GetUTC_timestamp_as_datetime()
                 #print("nodeValues: " + str(nodeValues))
-                #print("line 704")
+                print("line 828")
                 if "wsclient" in nodeValues:
-                    #print("wsclient in nodeValues")
+                    print("wsclient in nodeValues")
                     if "lastPing" not in nodeValues:
-                        #print("lastPing NOT in nodeValues therefore sending a ping")
+                        print("lastPing NOT in nodeValues therefore sending a ping")
                         try:
                             CommLog(current_time, "wss_ping_outgoing", "WSS", host_externalIP, nodeValues["internetIP"], "?")  #print("line 710")
                             await nodeValues["wsclient"].websocket.send("ping")
-                            #print("line 712")
+                            print("line 836")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 714")
+                            print("line 838")
                             total_wspingpong_bytes_sent += 4
-                            #print("line 716")
+                            print("line 840")
                         except Exception as e:
                             #print(e)
                             #print("assigning a lastPing anyway, despite exception")
-                            #print("line 720")
+                            print("line 844")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 722")
+                            print("line 846")
                         continue
                     elif "lastPong" not in nodeValues:
-                        #print("stale based on absent pong so flushing")
+                        print("stale based on absent pong so flushing")
                         await node_dict[fwknop_gpg_pubkey]["wsclient"].destroy()
-                        #print("line 781 - destroyed ws")
+                        print("line 851 - destroyed ws")
                         v = node_dict[fwknop_gpg_pubkey]
                         ArchiveNode(fwknop_gpg_pubkey, v)
                         del node_dict[fwknop_gpg_pubkey]  # flush node
-                        #print("line 784 - deleted node")
+                        print("line 855 - deleted node")
+                    elif (nodeValues["lastPing"] is None) or (nodeValues["lastPong"] is None):
+                        print("stale based on a null value for lastPing or lastPong, so flushing")
+                        await node_dict[fwknop_gpg_pubkey]["wsclient"].destroy()
+                        print("line 859 - destroyed ws")
+                        v = node_dict[fwknop_gpg_pubkey]
+                        ArchiveNode(fwknop_gpg_pubkey, v)
+                        del node_dict[fwknop_gpg_pubkey]  # flush node
+                        print("line 863 - deleted node")
                     elif (nodeValues["lastPing"] - nodeValues["lastPong"]).total_seconds() > websocket_stale_threshold:
-                        #print("stale based on ws ping pong so flushing")
+                        print("stale based on ws ping pong so flushing")
                         await node_dict[fwknop_gpg_pubkey]["wsclient"].destroy()
-                        #print("line 788 - destroyed ws")
+                        print("line 867 - destroyed ws")
                         v = node_dict[fwknop_gpg_pubkey]
                         ArchiveNode(fwknop_gpg_pubkey, v)
                         del node_dict[fwknop_gpg_pubkey]  # flush node
-                        #print("line 791 - deleted node")    
+                        print("line 871 - deleted node")    
                     elif (current_time - nodeValues["lastPong"]).total_seconds() > websocket_stale_threshold:
-                        #print("sending a ping")
+                        print("sending a ping")
                         try:
                             await nodeValues["wsclient"].websocket.send("ping")
                             CommLog(current_time, "wss_ping_outgoing", "WSS", host_externalIP, nodeValues["internetIP"], "?")  #print("line 740")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 742")
+                            print("line 878")
                             total_wspingpong_bytes_sent += 4
-                            #print("line 744")
+                            print("line 880")
                         except Exception as e:
                             #print(e)
                             #print("assigning a lastPing anyway, despite exception")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 815")
+                            print("line 885")
                         continue
-                elif (fwknop_gpg_pubkey in gpg_lookup) and (gpg_lookup[fwknop_gpg_pubkey][0] != host_fwknopd_pubkey_name):    # note this only works of the pubkey names are very unique, which they will be
-                    enoughSecondsElapsed = False
-                    #print("we are about to call OpenWebsocketClientConnectionToNode")
-                    t1 = asyncio.create_task(OpenWebsocketClientConnectionToNode(gpg_lookup[fwknop_gpg_pubkey][0], nodeValues["internetIP"], host_externalIP, node_dict))
-                    t2 = asyncio.create_task(asyncio.sleep(dict_of_intervals["ws_connection_check_interval"]/4))
-                    if done or pending:
-                        #print("   done: " + str(done))
-                        #print("pending: " + str(pending))
-                        for t in done:
-                            if "sleep" in str(t):
-                                enoughSecondsElapsed = True
-                        if enoughSecondsElapsed:
-                            for t in pending:
-                                if "OpenWebsocketClientConnectionToNode" in str(t):
-                                    print("it's been enough seconds and connection still pending, so cancelling task")
-                                    t.cancel()
-                                    await asyncio.sleep(0.5)
-                                    done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
-                    else:
-                        print("nothing done or pending so beginning wait for t1 and t2")
-                        done, pending = await asyncio.wait({t1,t2},return_when=asyncio.FIRST_COMPLETED)
-                    #print("we FINISHED CALLING OpenWebsocketClientConnectionToNode")
+                elif (fwknop_gpg_pubkey in gpg_lookup):
+                    if gpg_lookup[fwknop_gpg_pubkey][0] != host_fwknopd_pubkey_name:    # note this only works of the pubkey names are very unique, which they will be
+                        enoughSecondsElapsed = False
+                        print("we are about to call OpenWebsocketClientConnectionToNode")
+                        t1 = asyncio.create_task(OpenWebsocketClientConnectionToNode(gpg_lookup[fwknop_gpg_pubkey][0], nodeValues["internetIP"], host_externalIP, node_dict))
+                        t2 = asyncio.create_task(asyncio.sleep(dict_of_intervals["ws_connection_check_interval"]/4))
+                        if done or pending:
+                            #print("   done: " + str(done))
+                            #print("pending: " + str(pending))
+                            for t in done:
+                                if "sleep" in str(t):
+                                    enoughSecondsElapsed = True
+                            if enoughSecondsElapsed:
+                                for t in pending:
+                                    if "OpenWebsocketClientConnectionToNode" in str(t):
+                                        print("it's been enough seconds and connection still pending, so cancelling task")
+                                        t.cancel()
+                                        await asyncio.sleep(0.5)
+                                        done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+                        else:
+                            print("nothing done or pending so beginning wait for t1 and t2")
+                            done, pending = await asyncio.wait({t1,t2},return_when=asyncio.FIRST_COMPLETED)
+                        print("we FINISHED CALLING OpenWebsocketClientConnectionToNode")
+                else:
+                    print("we are doing nothing for some reason.")
+                    print(fwknop_gpg_pubkey)
+                    print(str(gpg_lookup))
+                    print("maybe the above will explain why we are doing nothing")
+                    #WIP looks like all the keys are different except for the host's so there is is never a match w prev condition
             #print(node_dict)
             #print()
         except Exception as e:
@@ -920,13 +951,13 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
         temp_fingerprint_dict = GetGPG_fingerprints()
         for keyname, fingerprint in temp_fingerprint_dict.items():
             if keyname != host_fwknopd_pubkey_name:
-                subprocess.run(["gpg", "--quiet", "--batch", "--delete-keys", fingerprint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                cmd = 'gpg --quiet --batch --delete-keys ' + fingerprint    #
+                subprocess.run(["sudo", "-E", "gpg", "--quiet", "--batch", "--delete-keys", fingerprint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                cmd = 'sudo -E gpg --quiet --batch --delete-keys ' + fingerprint    #
                 print("executed: " + cmd)                                   # here we are clearing out all the gpg keys EXCEPT for that of the host
         i = 1
         # recreate the .asc files for the current list of nodes
         for pubkey, nodeInfo in node_dict.items():
-            filepath = f"{containingDir}/NodeMaintainer_scratch/node" + str(i) + ".asc"
+            filepath = f"{containingDir}/NodeMaintainer_scratch/reserved_temp_pubkey_filename" + str(i) + ".asc"
             with open(filepath, 'w') as outfile:
                 outfile.write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
                 outfile.write('\n')
@@ -940,14 +971,14 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
         infile.close()
         for pubkey, nodeInfo in seed_dict.items():
             if pubkey not in node_dict:
-                filepath = f"{containingDir}/NodeMaintainer_scratch/node" + str(i) + ".asc"
+                filepath = f"{containingDir}/NodeMaintainer_scratch/reserved_temp_pubkey_filename" + str(i) + ".asc"
                 with open(filepath, 'w') as outfile:
                     outfile.write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
                     outfile.write('\n')
                     outfile.write(pubkey + '\n')
                     outfile.write('-----END PGP PUBLIC KEY BLOCK-----\n')
                 i += 1
-        cmd = f'gpg --quiet --import {containingDir}/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
+        cmd = f'sudo -E gpg --quiet --import {containingDir}/NodeMaintainer_scratch/*.asc'    # https://www.gnupg.org/documentation/manuals/gnupg.pdf
         subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print("executed: " + str(cmd))
         temp_fingerprint_dict = GetGPG_fingerprints()
@@ -995,9 +1026,9 @@ async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but w
         os.system(f"sudo -E cp {containingDir}/NodeMaintainer_scratch/fwknop_access.conf /etc/fwknop/access.conf")
         os.system("sudo -E chmod 0600 /etc/fwknop/access.conf")
         cmd = "sudo service fwknop-server restart"
-        print("Waiting 20 seconds to let fwknopd restart...")
+        print("Waiting 5 seconds to let fwknopd restart...")
         os.system(cmd)
-        time.sleep(20)
+        time.sleep(5)
         print("Done waiting.")
         await asyncio.sleep(fwknopd_refresh_interval)
 
@@ -1112,9 +1143,9 @@ async def BroadcastHeartbeat(node_dict):
                         heartbeatContent["wg_pubkey"] = myWireguardPublicKey
                         heartbeatContent_s = json.dumps(heartbeatContent, cls=TimestampEncoder)
                         await node_dict[k]["wsclient"].websocket.send(heartbeatContent_s)
-                        print()
-                        print(heartbeatContent_s)
-                        print()
+                        #print()
+                        #print(heartbeatContent_s)
+                        #print()
                         CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_heartbeat_outgoing", "WSS", host_externalIP, node_dict[k]["internetIP"], "?")
                         total_gossip_bytes_sent += len(heartbeatContent_s)   # seems safe to assume utf8 will in this scenario almost always be 1 byte per character
                     except Exception as e:
