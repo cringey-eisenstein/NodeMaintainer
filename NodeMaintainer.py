@@ -241,11 +241,11 @@ async def WriteCommLogBufferToDisk():
     global commLogBuffer
     while True:
         await asyncio.sleep(5)
-        outfile = open(commLogFile, "a")
+        #outfile = open(commLogFile, "a")  #uncomment to enable
         while len(commLogBuffer) > 0:
             line = commLogBuffer.popleft()
-            outfile.write(line)
-        outfile.close()
+            #outfile.write(line)   # uncomment to enable. the file gets big.
+        #outfile.close()   # uncomment to enable
 
 
 def ArchiveNode(fwknop_gpg_pubkey, nodevals):
@@ -821,7 +821,7 @@ class CustomWebsocketClient:
 
     async def start(self):    # https://websockets.readthedocs.io/en/stable/intro/quickstart.html
         try:
-            await asyncio.sleep(aFewSecs(8,10))
+            await asyncio.sleep(aFewSecs(3, 5))
             self.websocket = await websockets.connect(self.url, ssl=self.sslclientcontext)   # Connect to wss://destIP:wsport
             self.incoming_message_task = asyncio.create_task(self.wait_for_incoming())   # Set up a "background" task for further streaming reads of the web socket
             CommLog(GetUTC_timestamp_as_datetime_synchronous(), "wss_handshake_outgoing", "WSS", host_externalIP, self.destIP, self.wsport)
@@ -999,7 +999,10 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                             print("nothing done or pending so beginning wait for t1 and t2")
                             done, pending = await asyncio.wait({t1,t2},return_when=asyncio.FIRST_COMPLETED)
                         print("we FINISHED CALLING OpenWebsocketClientConnectionToNode")
-                        node_dict[fwknop_gpg_pubkey]["strikeCount"] = 0
+                        await asyncio.sleep(3.0)
+                        if MyWebsocketClientWarehouse.client_dict[node_dict[fwknop_gpg_pubkey]["wsclient"]].websocket.open:
+                            print("WSS connection is open so strikeCount gets set to 0")
+                            node_dict[fwknop_gpg_pubkey]["strikeCount"] = 0   # the strike counter should only be reset if the WSS connection succeeded
                 else:
                     print("we are doing nothing for some reason.")
                     #print(fwknop_gpg_pubkey)
@@ -1804,7 +1807,7 @@ async def maintainIP(node_dict):
     #while True: #not sure if I left this out by mistake?
     host_externalIP = GetHostInternetIP()
     node_dict[host_fwknopd_pubkey]["internetIP"] = host_externalIP
-    await asyncio.sleep(180 + aFewSecs(1,3))
+    await asyncio.sleep(180 + aFewSecs(1, 3))
 
 
 async def IPcollision(addr, node_dict=node_dict) -> bool: 
@@ -1889,8 +1892,9 @@ async def StartWireguard(node_dict):
                 PortKnock(gpg_lookup[k][0], v["internetIP"], host_externalIP, wireguard_port, "udp")
                 total_icmp_bytes_sent += 1460
 
-        await asyncio.sleep(aFewSecs(8,10))
+        await asyncio.sleep(aFewSecs(3, 5))
         subprocess.run(["sudo", "ip", "link", "set", "up", "dev", "wg0"], capture_output=True, text=True)
+        await asyncio.sleep(0.2)
         subprocess.run(["sudo", "ip", "route", "add", "10.0.0.0/8", "dev", "wg0"], capture_output=True, text=True)
         wireguardStartCount += 1
     except Exception as e:
@@ -1926,13 +1930,13 @@ async def PrimeWireguard(node_dict):  # garauntees we rebuild the conf file ever
     global myWireguardPublicKey
     global wireguardNeedsPriming
 
-    await asyncio.sleep(4 + aFewSecs(1,3))
+    await asyncio.sleep(3 + aFewSecs(1,3))
     while not myWireguardIP:
         myWireguardIP = await SelfAssignWireguardIP()
-        await asyncio.sleep(5 + aFewSecs(1,3))
+        await asyncio.sleep(3 + aFewSecs(1,3))
     myWireguardPublicKey = await GetWireguardPublicKey(True, node_dict)
     UpdateConfigFile(wireguardConfigFileName)
-    await asyncio.sleep(5 + aFewSecs(1,3))
+    await asyncio.sleep(3 + aFewSecs(1,3))
 
     while True:
         await asyncio.sleep(180 + aFewSecs(1,3))
