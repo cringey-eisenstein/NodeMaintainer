@@ -46,7 +46,7 @@
 # udp/62201
 
 # tmux
-# python3 NodeMaintainer.py [node_file.json] [$HOME/.gnupg]
+# python3 NodeMaintainer.py [node_file.json] [$HOME/.gnupg] [uri-for-ipcheck-server]
 # detach from tmux
 # install k3s
 
@@ -87,22 +87,27 @@ import psutil
 
 nodeFilePath = "nodes_small.json"
 gpg_home_dir = "/home/user/.gnupg"
+ipcheck_server = "http://ifconfig.co/"  # not sure whether ifconfig.co will work given how frequently the script pings
+                                        # this address, so probably better to run your own.
 
 if len(sys.argv) >= 2:
     temp = str(sys.argv[1])
     if os.path.isfile(temp):
         nodeFilePath = temp
-if len(sys.argv) == 3:
+if len(sys.argv) >= 3:
     temp = str(sys.argv[2])
     if os.path.isdir(temp):
         gpg_home_dir = temp
+if len(sys.argv) == 4:
+    temp = str(sys.argv[3])
+    if "http" in temp:
+        ipcheck_server = temp
 
 
 print("nodeFilePath: " + str(nodeFilePath))
 time.sleep(2)
 
 # You'll want to UPDATE THESE as needed.
-ipcheck_server = "http://34.171.3.165:8080/"
 websocket_port = 51942
 wireguard_port = 51943
 nameOfThisScript = "NodeMaintainer.py"
@@ -594,6 +599,8 @@ def GetHostInternetIP() -> str:
     complProc = subprocess.run(["curl", ipcheck_server], capture_output=True, text=True)
     ans = complProc.stdout
     ans = ans.strip()
+    print("GetHostInternetIP " + ipcheck_server + " returned " + ans)
+    time.sleep(1)
     CommLog(GetUTC_timestamp_as_datetime_synchronous(), "ip_addr_check_outgoing", "HTTP", host_externalIP, ipcheck_server, "?")
     return ans
 
