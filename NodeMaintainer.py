@@ -115,7 +115,7 @@ fwknopd_refresh_interval = 240
 
 # These are parameters with initial values that seem reasonable, 
 # but they will fluctuate as the program runs, depending on whether upload rates are above/below target.
-nodeSampleSize = 10  
+nodeSampleSize = 5  
 maxHops = 6
 dict_of_intervals = dict()
 dict_of_intervals["ws_connection_check_interval"] = 20  # seconds
@@ -279,6 +279,55 @@ def GetHostIfaceName():
     return None
 
 
+async def NewNodeKeyMonitor(node_dict):
+    if not os.path.isdir(f"{containingDir}/inbox_for_gpg_pubkeys"):
+        os.system(f"mkdir {containingDir}/inbox_for_gpg_pubkeys/")
+    if not os.path.isdir(f"{containingDir}/outbox_for_gpg_pubkeys"):
+        os.system(f"mkdir {containingDir}/outbox_for_gpg_pubkeys/")
+    # public keys of new nodes should be moved/copied to the inbox_for_gpg_pubkeys/ dir
+    # the filename for each key should have this format:
+    # 123.4.5.6_keyname.asc   [123.4.5.6 in the internet IP address of the new node]
+    # NodeMaintainer.py will monitor the inbox dir and process any keys added.
+    # if processing succeeds, it will copy the input file to the outbox with 
+    # "p." prepended to the filename, and remove the file from inbox
+    # e.g.: p.123.4.5.6_keyname.asc
+    # if processing fails, the same thing happens, but with "E." prepended
+    # e.g.: E.123.6.6.6_keyn6me.asc
+    while True:
+        for filename in os.listdir(f"{containingDir}/inbox_for_gpg_pubkeys"):
+            pubkey = Ingest_asc_file(f"{containingDir}/inbox_for_gpg_pubkeys/{filename}")
+            ip, nodeName = ParseAndCheckKey(filename, pubkey)
+            if ip:
+                # copy to outbox #change name to preprended p.
+                os.system(f"cp {containingDir}/inbox_for_gpg_pubkeys/{filename} {containingDir}/outbox_for_gpg_pubkeys/p.{filename}")
+                node_dict[pubkey] = dict()
+                node_dict[pubkey]["internetIP"] = ip
+            else:
+                # copy to outbox #change name to preprended E.
+                print("ingestion of new node info failed")
+                time.sleep(2)
+                os.system(f"cp {containingDir}/inbox_for_gpg_pubkeys/{filename} {containingDir}/outbox_for_gpg_pubkeys/E.{filename}")
+            #remove from inbox
+            os.system(f"rm {containingDir}/inbox_for_gpg_pubkeys/{filename}")
+        await asyncio.sleep(10)
+
+
+def ParseAndCheckKey(filename, pubkey):
+    ip_candidate, nodename = None, None
+    m1 = re.search('^(\d\d?\d?\.\d\d?\d?\.\d\d?\d?\.\d\d?\d?)\_(.+)\.asc$', filename)
+    if m1:
+        ip_candidate = m1.group(1)
+        nodename = m1.group(2)
+    m2 = re.search('[^\S]+', pubkey)
+    if m2:
+        return None, nodename
+    try:
+        preAns = ipaddress.ip_address(ip_candidate)
+    except:
+        return None, nodename
+    return ip_candidate, nodename
+
+
 def gpg_is_installed():
     result = subprocess.run(['which', 'gpg'], stdout=subprocess.PIPE)
     if len(result.stdout.decode('utf-8')) > 0:
@@ -327,7 +376,11 @@ def GetGPG_pubkey(keyname):
         subprocess.run(["gpg", "--export", "-a", key_fp], stdout=outfile, stderr=subprocess.PIPE)
     cmd = "gpg --export -a " + key_fp + f" > {containingDir}/NodeMaintainer_scratch/tempPubGpg.asc"
     print("executed: " + str(cmd))
-    with open(f"{containingDir}/NodeMaintainer_scratch/tempPubGpg.asc", 'r') as infile:
+    return Ingest_asc_file(f"{containingDir}/NodeMaintainer_scratch/tempPubGpg.asc")
+
+
+def Ingest_asc_file(filepath):
+    with open(filepath, 'r') as infile:
         lines = infile.readlines()
         lines = [line.rstrip() for line in lines]
     concatKey = ""
@@ -1026,7 +1079,7 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
             else:
                 print("not sure what happened but lets try to keep going")
                 #sys.exit()
-                time.sleep(15)
+                time.sleep(2)
 
 
 async def Refresh_fwknopd(node_dict):      # similar to ConfigureFwknopd() but we assume more stuff is already initialized 
@@ -1334,8 +1387,8 @@ async def RegulateBandwidth():
         current_time = await GetUTC_timestamp_as_datetime()
         instantaneous_byteAndTimestamp = (current_time, total_wspingpong_bytes_sent, total_icmp_bytes_sent, total_gossip_bytes_sent)
         historical_byteAndTimestampStats.append(instantaneous_byteAndTimestamp)
-        # let's try 3 minutes ago
-        wspingpong_bytes_Xmin_ago, icmp_bytes_Xmin_ago, gossip_bytes_Xmin_ago, exactTimeDelta = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 3)
+        # let's try 0.5 minutes ago
+        wspingpong_bytes_Xmin_ago, icmp_bytes_Xmin_ago, gossip_bytes_Xmin_ago, exactTimeDelta = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 0.5)
         #print("exactTimeDelta: " + str(exactTimeDelta))
         #print(str([wspingpong_bytes_Xmin_ago, icmp_bytes_Xmin_ago, gossip_bytes_Xmin_ago, exactTimeDelta]))
         if exactTimeDelta and wspingpong_bytes_Xmin_ago and icmp_bytes_Xmin_ago and gossip_bytes_Xmin_ago:
@@ -1390,11 +1443,11 @@ async def RegulateBandwidth():
                 maxHops = 6
             if nodeSampleSize < 1:
                 nodeSampleSize = 1
-            if nodeSampleSize > min(12, len(node_dict.keys())):
-                nodeSampleSize = min(12, len(node_dict.keys()))
+            if nodeSampleSize > min(5, len(node_dict.keys())):
+                nodeSampleSize = min(5, len(node_dict.keys()))
 
-        # now let's also try 20 mins ago
-        wspingpong_bytes_20min_ago, icmp_bytes_20min_ago, gossip_bytes_20min_ago, exactTimeDelta20 = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 20)
+        # now let's also try 5 mins ago
+        wspingpong_bytes_20min_ago, icmp_bytes_20min_ago, gossip_bytes_20min_ago, exactTimeDelta20 = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 5)
         #print("exactTimeDelta20: " + str(exactTimeDelta20))
         #time.sleep(2)
         if exactTimeDelta20 and wspingpong_bytes_20min_ago and icmp_bytes_20min_ago and gossip_bytes_20min_ago:
@@ -1471,10 +1524,10 @@ async def RegulateBandwidth():
                 gossip_dampenFactor = 4
             if gossip_undampenFactor > 4:
                 gossip_undampenFactor = 4
-            if nodeIncrement > 1000:
-                nodeIncrement = 1000
-            if nodeDecrement > 1000:
-                nodeDecrement = 1000
+            if nodeIncrement > 5:
+                nodeIncrement = 5
+            if nodeDecrement > 5:
+                nodeDecrement = 5
 
             if ws_dampenFactor < 1.01:
                 ws_dampenFactor = 1.01
@@ -2052,6 +2105,7 @@ async def main():
         CheckWireguardHealth(node_dict=node_dict),
         pull_wg_ping_results_into_node_dict(node_dict=node_dict),
         DetectOverallHealth(node_dict=node_dict),
+        NewNodeKeyMonitor(node_dict=node_dict),
         WriteCommLogBufferToDisk())
     #print("kicked off all the async functions. we are running. line 1834")
     #app_log.info("kicked off all the async functions. we are running. line 1834")
