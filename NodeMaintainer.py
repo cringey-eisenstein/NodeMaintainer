@@ -110,7 +110,7 @@ time.sleep(2)
 # You'll want to UPDATE THESE as needed.
 websocket_port = 51942
 wireguard_port = 51943
-nameOfThisScript = "NodeMaintainer.py"
+nameOfThisScript = "NodeMaintainer_sqlite.py"
 
 # Default values are what seem sensible to me.
 target_wspingpong_bandwidth = 2   # upload bandwidth targets in KB/s
@@ -184,6 +184,8 @@ containingDir = m1.group(1) if m1 else None
 # async access/ different scope access to node_dict causing the script to loose track of nodes
 # over time. However this might not be the case and I am trying a different
 # potential fix before implementing the sqlite idea since it might be unnecessary.
+# https://www.digitalocean.com/community/tutorials/how-to-use-the-sqlite3-module-in-python-3
+# https://docs.python.org/3/library/sqlite3.html
 
 
 # first connection to the in-memory database (NODES_DB / nodes_db)
@@ -307,6 +309,7 @@ async def NewNodeKeyMonitor(node_dict):
                 os.system(f"cp {containingDir}/inbox_for_gpg_pubkeys/{filename} {containingDir}/outbox_for_gpg_pubkeys/p.{filename}")
                 node_dict[pubkey] = dict()
                 node_dict[pubkey]["internetIP"] = ip
+                node_dict[pubkey]["strikeCount"] = 0
             else:
                 # copy to outbox #change name to preprended E.
                 print("ingestion of new node info failed")
@@ -1394,8 +1397,8 @@ async def RegulateBandwidth():
         current_time = await GetUTC_timestamp_as_datetime()
         instantaneous_byteAndTimestamp = (current_time, total_wspingpong_bytes_sent, total_icmp_bytes_sent, total_gossip_bytes_sent)
         historical_byteAndTimestampStats.append(instantaneous_byteAndTimestamp)
-        # let's try 0.5 minutes ago
-        wspingpong_bytes_Xmin_ago, icmp_bytes_Xmin_ago, gossip_bytes_Xmin_ago, exactTimeDelta = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 0.5)
+        # let's try 8 seconds (0.133 minutes) ago
+        wspingpong_bytes_Xmin_ago, icmp_bytes_Xmin_ago, gossip_bytes_Xmin_ago, exactTimeDelta = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 0.133)
         #print("exactTimeDelta: " + str(exactTimeDelta))
         #print(str([wspingpong_bytes_Xmin_ago, icmp_bytes_Xmin_ago, gossip_bytes_Xmin_ago, exactTimeDelta]))
         if exactTimeDelta and wspingpong_bytes_Xmin_ago and icmp_bytes_Xmin_ago and gossip_bytes_Xmin_ago:
@@ -1453,8 +1456,8 @@ async def RegulateBandwidth():
             if nodeSampleSize > min(5, len(node_dict.keys())):
                 nodeSampleSize = min(5, len(node_dict.keys()))
 
-        # now let's also try 5 mins ago
-        wspingpong_bytes_20min_ago, icmp_bytes_20min_ago, gossip_bytes_20min_ago, exactTimeDelta20 = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 5)
+        # now let's also try 2 mins ago
+        wspingpong_bytes_20min_ago, icmp_bytes_20min_ago, gossip_bytes_20min_ago, exactTimeDelta20 = FindByteCountsFromXminAgo(current_time, historical_byteAndTimestampStats, 2)
         #print("exactTimeDelta20: " + str(exactTimeDelta20))
         #time.sleep(2)
         if exactTimeDelta20 and wspingpong_bytes_20min_ago and icmp_bytes_20min_ago and gossip_bytes_20min_ago:
@@ -1715,6 +1718,9 @@ async def display_node_dict(node_dict):
         proc = psutil.Process()
         numOpenFiles = proc.open_files()
         print("num open files for this proc: " + str(numOpenFiles))
+
+        #sysload1min, sysload5min, sysload15min = os.getloadavg()
+        #will start using this once I get chance to test it WIP
 
         entry_timestamp_dt = await GetUTC_timestamp_as_datetime() 
         entry_timestamp = entry_timestamp_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
