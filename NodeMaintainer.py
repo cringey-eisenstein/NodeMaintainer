@@ -110,7 +110,7 @@ time.sleep(2)
 # You'll want to UPDATE THESE as needed.
 websocket_port = 51942
 wireguard_port = 51943
-nameOfThisScript = "NodeMaintainer_sqlite.py"
+nameOfThisScript = "NodeMaintainer.py"
 
 # Default values are what seem sensible to me.
 target_wspingpong_bandwidth = 2   # upload bandwidth targets in KB/s
