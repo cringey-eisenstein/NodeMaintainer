@@ -2088,7 +2088,6 @@ async def main():
 
     def signal_handler(sig, frame):
         global scriptShouldBeRunning
-        global NODES_DB_1
         print('You pressed Ctrl+C!')
         print("cleaning up...")
         os.system("rm $HOME/autobahn_server.key")
@@ -2097,7 +2096,6 @@ async def main():
         os.system("sudo -E mv /etc/fwknop/fwknopd.conf.old /etc/fwknop/fwknopd.conf")
         os.system("sudo -E mv /etc/fwknop/access.conf.old /etc/fwknop/access.conf")
         os.system("sudo iptables -F")
-        NODES_DB_1.close()
         scriptShouldBeRunning = False
         print("done cleaning up.")
         shutdown_event.set()
