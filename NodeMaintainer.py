@@ -81,8 +81,6 @@ from autobahn.asyncio.websocket import WebSocketServerProtocol, WebSocketServerF
 import ssl
 import ipaddress
 
-import sqlite3
-
 import psutil
 
 nodeFilePath = "nodes_small.json"
@@ -151,7 +149,7 @@ meshStatsLogFile = "meshStatsLog.csv"
 
 if not os.path.isfile(meshStatsLogFile):
     outfile = open(meshStatsLogFile, "a")
-    line = "timestamp,nonarchived nodes (num),nonarchived nodes with lastPongWS (num),nonarchived nodes with ICMPreceived (num),send gossip data rate (KB/s) short window,send gossip data rate (KB/s) long window,gossip dampen,gossip undampen,nodeDecrement (num nodes),nodeIncrement (num nodes),nodeSampleSize (num nodes),websocket stale threshold (s),wireguard stale threshold (s),heartbeatInterval (s),wireguard start count\n"
+    line = "timestamp,nonarchived nodes (num),nonarchived nodes with lastPongWS (num),nonarchived nodes with ICMPreceived (num),send gossip data rate (KB/s) short window,send gossip data rate (KB/s) long window,gossip dampen,gossip undampen,nodeDecrement (num nodes),nodeIncrement (num nodes),nodeSampleSize (num nodes),websocket stale threshold (s),wireguard stale threshold (s),heartbeatInterval (s),wireguard start count,sysload1min,memTotal_MB,memAvailable_MB\n"
     outfile.write(line)
     outfile.close()
 
@@ -176,38 +174,6 @@ thisScriptPath = os.path.realpath(__file__)
 my_regex = r"(.+)/" + re.escape(nameOfThisScript) + r"$"
 m1 = re.search(my_regex, thisScriptPath)
 containingDir = m1.group(1) if m1 else None
-
-
-# These sqlite lines are here in case I decide later to switch from using the
-# global node_dict to track the nodes to using a proper database.
-# I have a suspicion that there might be something funky happening with
-# async access/ different scope access to node_dict causing the script to loose track of nodes
-# over time. However this might not be the case and I am trying a different
-# potential fix before implementing the sqlite idea since it might be unnecessary.
-# https://www.digitalocean.com/community/tutorials/how-to-use-the-sqlite3-module-in-python-3
-# https://docs.python.org/3/library/sqlite3.html
-
-
-# first connection to the in-memory database (NODES_DB / nodes_db)
-NODES_DB_1 = sqlite3.connect("file:nodes_db?mode=memory&cache=shared", uri=True)
-
-# create the table Active
-NODES_DB_1.execute("CREATE TABLE IF NOT EXISTS Active (gpgpubkey TEXT, archive_ts TIMESTAMP, hop INTEGER, internetIP TEXT, lastPing TIMESTAMP, lastPong TIMESTAMP, last_wg_icmp_receive_timestamp TIMESTAMP, last_wg_icmp_send_timestamp TIMESTAMP, wg_ip TEXT, wg_pubkey TEXT)")
-
-# create the table Archived
-NODES_DB_1.execute("CREATE TABLE IF NOT EXISTS Archived (gpgpubkey TEXT, archive_ts TIMESTAMP, hop INTEGER, internetIP TEXT, lastPing TIMESTAMP, lastPong TIMESTAMP, last_wg_icmp_receive_timestamp TIMESTAMP, last_wg_icmp_send_timestamp TIMESTAMP, wg_ip TEXT, wg_pubkey TEXT)")
-
-
-def sqlite_InsertOrUpdate(db=NODES_DB_1):
-    pass
-
-
-def sqlite_Delete(db=NODES_DB_1):
-    pass
-
-
-def sqlite_ReadRow(db=NODES_DB_1):
-    pass
 
 
 # Specializing JSON object decoding
@@ -595,7 +561,6 @@ def GetUTC_timestamp_as_datetime_synchronous() -> datetime:
 
 
 def GetHostInternetIP() -> str:
-    #ans = node_dict[keyname_lookup[host_fwknopd_pubkey_name][0]]["internetIP"]   # temporary until we have a server that returns the requester's IP address
     global ipcheck_server
     global host_externalIP
     ans = "0.0.0.0"
@@ -934,7 +899,6 @@ async def OpenWebsocketClientConnectionToNode(gpg_keyname, destIP, sourceIP, nod
             total_gossip_bytes_sent += 215   # guesstimate based on googling about the WSS handshake
             ref = MyWebsocketClientWarehouse.store(new_ws_client_instance)
             node_dict[keyname_lookup[gpg_keyname][0]]["wsclient"] = ref
-            #WIP
         except Exception as e:
             app_log.warning("error opening websocket connection to " + destIP)
             app_log.warning(e)
@@ -956,10 +920,9 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
             await AsyncResponsiveSleep("ws_connection_check_interval")
             print("Maintain_fwknopd_ws_connections_stats")
             print("Maintain_fwknopd_ws_connections_stats host_externalIP: " + host_externalIP)
-            for fwknop_gpg_pubkey, nodeValues in node_dict.items():
+            for fwknop_gpg_pubkey, nodeValues in list(node_dict.items()):
                 current_time = await GetUTC_timestamp_as_datetime()
                 #print("nodeValues: " + str(nodeValues))
-                #print("line 828")
                 if "wsclient" in nodeValues:
                     print("wsclient in nodeValues")
                     if "lastPing" not in nodeValues:
@@ -967,23 +930,18 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                         try:
                             CommLog(current_time, "wss_ping_outgoing", "WSS", host_externalIP, nodeValues["internetIP"], "?")  #print("line 710")
                             await MyWebsocketClientWarehouse.client_dict[nodeValues["wsclient"]].websocket.send("ping")                            
-                            #print("line 836")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 838")
                             total_wspingpong_bytes_sent += 4
-                            #print("line 840")
                         except Exception as e:
                             #print(e)
                             #print("assigning a lastPing anyway, despite exception")
-                            #print("line 844")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 846")
                         continue
                     elif "lastPong" not in nodeValues:
                         await MyWebsocketClientWarehouse.client_dict[node_dict[fwknop_gpg_pubkey]["wsclient"]].destroy()
                         del node_dict[fwknop_gpg_pubkey]["wsclient"]  # flush "wsclient" entry
                         del node_dict[fwknop_gpg_pubkey]["lastPing"]
-                        print("line 920 - destroyed ws - but it should get recreated in a moment")
+                        print("line 944 - destroyed ws - but it should get recreated in a moment")
                         if node_dict[fwknop_gpg_pubkey]["strikeCount"] < 3:
                             node_dict[fwknop_gpg_pubkey]["strikeCount"] += 1
                             print("stale based on absent pong so strike " + str(node_dict[fwknop_gpg_pubkey]["strikeCount"]) + " -- recreating ws client but not flushing yet")
@@ -993,12 +951,12 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                             v = node_dict[fwknop_gpg_pubkey]
                             ArchiveNode(fwknop_gpg_pubkey, v)
                             del node_dict[fwknop_gpg_pubkey]  # flush node
-                            print("line 930 - deleted node")
+                            print("line 954 - deleted node")
                     elif (nodeValues["lastPing"] is None) or (nodeValues["lastPong"] is None):
                         await MyWebsocketClientWarehouse.client_dict[node_dict[fwknop_gpg_pubkey]["wsclient"]].destroy()
                         del node_dict[fwknop_gpg_pubkey]["wsclient"]  # flush "wsclient" entry
                         del node_dict[fwknop_gpg_pubkey]["lastPing"]
-                        print("line 935 - destroyed ws - but it should get recreated in a moment")
+                        print("line 959 - destroyed ws - but it should get recreated in a moment")
                         if node_dict[fwknop_gpg_pubkey]["strikeCount"] < 3:
                             node_dict[fwknop_gpg_pubkey]["strikeCount"] += 1
                             print("stale based on a null value for lastPing or lastPong so strike " + str(node_dict[fwknop_gpg_pubkey]["strikeCount"]) + " -- recreating ws client but not flushing yet")
@@ -1008,12 +966,12 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                             v = node_dict[fwknop_gpg_pubkey]
                             ArchiveNode(fwknop_gpg_pubkey, v)
                             del node_dict[fwknop_gpg_pubkey]  # flush node
-                            print("line 945 - deleted node")
+                            print("line 969 - deleted node")
                     elif (nodeValues["lastPing"] - nodeValues["lastPong"]).total_seconds() > websocket_stale_threshold:
                         await MyWebsocketClientWarehouse.client_dict[node_dict[fwknop_gpg_pubkey]["wsclient"]].destroy()
                         del node_dict[fwknop_gpg_pubkey]["wsclient"]  # flush "wsclient" entry
                         del node_dict[fwknop_gpg_pubkey]["lastPing"]
-                        print("line 950 - destroyed ws - but it should get recreated in a moment")
+                        print("line 974 - destroyed ws - but it should get recreated in a moment")
                         if node_dict[fwknop_gpg_pubkey]["strikeCount"] < 3:
                             node_dict[fwknop_gpg_pubkey]["strikeCount"] += 1
                             print("stale based on ws ping pong so strike " + str(node_dict[fwknop_gpg_pubkey]["strikeCount"]) + " -- recreating ws client but not flushing yet")
@@ -1023,21 +981,18 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                             v = node_dict[fwknop_gpg_pubkey]
                             ArchiveNode(fwknop_gpg_pubkey, v)
                             del node_dict[fwknop_gpg_pubkey]  # flush node
-                            print("line 960 - deleted node")
+                            print("line 984 - deleted node")
                     elif (current_time - nodeValues["lastPong"]).total_seconds() > websocket_stale_threshold:
                         print("sending a ping")
                         try:
                             await MyWebsocketClientWarehouse.client_dict[node_dict[fwknop_gpg_pubkey]["wsclient"]].websocket.send("ping")
                             CommLog(current_time, "wss_ping_outgoing", "WSS", host_externalIP, nodeValues["internetIP"], "?")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 878")
                             total_wspingpong_bytes_sent += 4
-                            #print("line 880")
                         except Exception as e:
                             #print(e)
                             #print("assigning a lastPing anyway, despite exception")
                             node_dict[fwknop_gpg_pubkey]["lastPing"] = current_time
-                            #print("line 885")
                         continue
                 elif (fwknop_gpg_pubkey in gpg_lookup):
                     if gpg_lookup[fwknop_gpg_pubkey][0] != host_fwknopd_pubkey_name:    # note this only works if the pubkey names are very unique, which they will be
@@ -1085,6 +1040,9 @@ async def Maintain_fwknopd_ws_connections_stats(node_dict):
                 continue
             elif "dictionary keys changed" in str(e):
                 print("actually no big deal the dict keys changed is all")
+                continue
+            elif "\'CustomWebsocketClient\' object has no attribute \'websocket\'" in str(e):
+                print("actually no big deal one of the websocket clients failed is all")
                 continue
             else:
                 print("not sure what happened but lets try to keep going")
@@ -1411,10 +1369,10 @@ async def RegulateBandwidth():
             actual_gossip_bandwidth /= 1000
             #print(str([actual_wspingpong_bandwidth, actual_icmp_bandwidth, actual_gossip_bandwidth]))
 
-            if actual_wspingpong_bandwidth/target_wspingpong_bandwidth > 1.3:
+            if actual_wspingpong_bandwidth/target_wspingpong_bandwidth > 1.05:
                 websocket_stale_threshold *= ws_dampenFactor
                 dict_of_intervals["ws_connection_check_interval"] *= ws_dampenFactor
-            elif actual_wspingpong_bandwidth/target_wspingpong_bandwidth < 0.8:
+            elif actual_wspingpong_bandwidth/target_wspingpong_bandwidth < 0.2:
                 websocket_stale_threshold /= ws_undampenFactor
                 dict_of_intervals["ws_connection_check_interval"] /= ws_undampenFactor
             if dict_of_intervals["ws_connection_check_interval"] < 5:
@@ -1426,18 +1384,18 @@ async def RegulateBandwidth():
             if websocket_stale_threshold < 4*dict_of_intervals["ws_connection_check_interval"]:
                 websocket_stale_threshold = 4*dict_of_intervals["ws_connection_check_interval"]
 
-            if actual_icmp_bandwidth/target_icmp_bandwidth > 1.3:
+            if actual_icmp_bandwidth/target_icmp_bandwidth > 1.05:
                 wireguard_stale_threshold *= icmp_dampenFactor
-            elif actual_icmp_bandwidth/target_icmp_bandwidth < 0.8:
+            elif actual_icmp_bandwidth/target_icmp_bandwidth < 0.2:
                 wireguard_stale_threshold /= icmp_undampenFactor
             if wireguard_stale_threshold < 4*dict_of_intervals["ws_connection_check_interval"]:
                 wireguard_stale_threshold = 4*dict_of_intervals["ws_connection_check_interval"]
 
-            if actual_gossip_bandwidth/target_gossip_bandwidth > 1.3:
+            if actual_gossip_bandwidth/target_gossip_bandwidth > 1.05:
                 nodeSampleSize -= nodeDecrement
                 dict_of_intervals["heartbeatInterval"] = dict_of_intervals["heartbeatInterval"]*gossip_dampenFactor
                 maxHops -= nodeDecrement
-            elif actual_gossip_bandwidth/target_gossip_bandwidth < 0.8:
+            elif actual_gossip_bandwidth/target_gossip_bandwidth < 0.1:
                 nodeSampleSize += nodeIncrement
                 dict_of_intervals["heartbeatInterval"] = dict_of_intervals["heartbeatInterval"]/gossip_undampenFactor
                 maxHops += nodeIncrement
@@ -1475,11 +1433,11 @@ async def RegulateBandwidth():
             bigwindow_gossip_bandwidth = temp_gossip_bandwidth
             #print()
             #print("    ws dampen, undampen: " + "{:.2f}".format(ws_dampenFactor) + "  " + "{:.2f}".format(ws_undampenFactor))
-            if (temp_wspingpong_bandwidth/target_wspingpong_bandwidth) > 1.3:
+            if (temp_wspingpong_bandwidth/target_wspingpong_bandwidth) > 1.05:
                 ws_dampenFactor *= ((temp_wspingpong_bandwidth/target_wspingpong_bandwidth) - 0.3)
                 ws_undampenFactor /= ((temp_wspingpong_bandwidth/target_wspingpong_bandwidth) - 0.3)
                 #print("increased ws_dampenFactor")
-            elif (temp_wspingpong_bandwidth/target_wspingpong_bandwidth) < 0.8:
+            elif (temp_wspingpong_bandwidth/target_wspingpong_bandwidth) < 0.2:
                 ws_undampenFactor *= ((0.8 - (temp_wspingpong_bandwidth/target_wspingpong_bandwidth)) + 1)
                 ws_dampenFactor /= ((0.8 - (temp_wspingpong_bandwidth/target_wspingpong_bandwidth)) + 1)
                 #print("increased ws_undampenFactor")
@@ -1490,11 +1448,11 @@ async def RegulateBandwidth():
             #print()
 
             #print("  icmp dampen, undampen: " + "{:.2f}".format(icmp_dampenFactor) + "  " + "{:.2f}".format(icmp_undampenFactor))
-            if (temp_icmp_bandwidth/target_icmp_bandwidth) > 1.3:
+            if (temp_icmp_bandwidth/target_icmp_bandwidth) > 1.05:
                 icmp_dampenFactor *= ((temp_icmp_bandwidth/target_icmp_bandwidth) - 0.3)
                 icmp_undampenFactor /= ((temp_icmp_bandwidth/target_icmp_bandwidth) - 0.3)
                 #print("increased icmp_dampenFactor")
-            elif (temp_icmp_bandwidth/target_icmp_bandwidth) < 0.8:
+            elif (temp_icmp_bandwidth/target_icmp_bandwidth) < 0.2:
                 icmp_undampenFactor *= ((0.8 - (temp_icmp_bandwidth/target_icmp_bandwidth)) + 1)
                 icmp_dampenFactor /= ((0.8 - (temp_icmp_bandwidth/target_icmp_bandwidth)) + 1)
                 #print("increased icmp_undampenFactor")
@@ -1505,13 +1463,13 @@ async def RegulateBandwidth():
             #print()
 
             #print("gossip dampen, undampen: " + "{:.2f}".format(gossip_dampenFactor) + "  " + "{:.2f}".format(gossip_undampenFactor))
-            if (temp_gossip_bandwidth/target_gossip_bandwidth) > 1.3:
+            if (temp_gossip_bandwidth/target_gossip_bandwidth) > 1.05:
                 gossip_dampenFactor *= ((temp_gossip_bandwidth/target_gossip_bandwidth) - 0.3)
                 nodeDecrement *= ((temp_gossip_bandwidth/target_gossip_bandwidth) - 0.3)
                 gossip_undampenFactor /= ((temp_gossip_bandwidth/target_gossip_bandwidth) - 0.3)
                 nodeIncrement /= ((temp_gossip_bandwidth/target_gossip_bandwidth) - 0.3)
                 #print("increased gossip_dampenFactor")
-            elif (temp_gossip_bandwidth/target_gossip_bandwidth) < 0.8:
+            elif (temp_gossip_bandwidth/target_gossip_bandwidth) < 0.2:
                 gossip_undampenFactor *= ((0.8 - (temp_gossip_bandwidth/target_gossip_bandwidth)) + 1)
                 nodeIncrement *= ((0.8 - (temp_gossip_bandwidth/target_gossip_bandwidth)) + 1)
                 gossip_dampenFactor /= ((0.8 - (temp_gossip_bandwidth/target_gossip_bandwidth)) + 1)
@@ -1524,18 +1482,18 @@ async def RegulateBandwidth():
             #print()
             if ws_dampenFactor > 4:
                 ws_dampenFactor = 4
-            if ws_undampenFactor > 4:
-                ws_undampenFactor = 4
+            if ws_undampenFactor > 2:
+                ws_undampenFactor = 2
             if icmp_dampenFactor > 4:
                 icmp_dampenFactor = 4
-            if icmp_undampenFactor > 4:
-                icmp_undampenFactor = 4
+            if icmp_undampenFactor > 2:
+                icmp_undampenFactor = 2
             if gossip_dampenFactor > 4:
                 gossip_dampenFactor = 4
-            if gossip_undampenFactor > 4:
-                gossip_undampenFactor = 4
-            if nodeIncrement > 5:
-                nodeIncrement = 5
+            if gossip_undampenFactor > 2:
+                gossip_undampenFactor = 2
+            if nodeIncrement > 3:
+                nodeIncrement = 3
             if nodeDecrement > 5:
                 nodeDecrement = 5
 
@@ -1719,8 +1677,9 @@ async def display_node_dict(node_dict):
         numOpenFiles = proc.open_files()
         print("num open files for this proc: " + str(numOpenFiles))
 
-        #sysload1min, sysload5min, sysload15min = os.getloadavg()
-        #will start using this once I get chance to test it WIP
+        sysload1min, sysload5min, sysload15min = os.getloadavg()
+        memTotal_MB = int(psutil.virtual_memory().total/1000000)
+        memAvailable_MB = int(psutil.virtual_memory().available/1000000)
 
         entry_timestamp_dt = await GetUTC_timestamp_as_datetime() 
         entry_timestamp = entry_timestamp_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -1737,11 +1696,13 @@ async def display_node_dict(node_dict):
             "{:.2f}".format(websocket_stale_threshold) + "," +\
             "{:.2f}".format(wireguard_stale_threshold) + "," +\
             "{:.2f}".format(dict_of_intervals["heartbeatInterval"]) + "," +\
-            str(wireguardStartCount) + "\n"
+            str(wireguardStartCount) + "," +\
+            "{:.3f}".format(sysload1min) + "," +\
+            "{:.3f}".format(memTotal_MB) + "," +\
+            "{:.3f}".format(memAvailable_MB) + "\n"
         outfile = open(meshStatsLogFile, "a")
         outfile.write(line)
         outfile.close()
-
         await asyncio.sleep(10)
         print()
 
@@ -2120,8 +2081,8 @@ async def main():
         DetectOverallHealth(node_dict=node_dict),
         NewNodeKeyMonitor(node_dict=node_dict),
         WriteCommLogBufferToDisk())
-    #print("kicked off all the async functions. we are running. line 1834")
-    #app_log.info("kicked off all the async functions. we are running. line 1834")
+    #print("kicked off all the async functions. we are running.")
+    #app_log.info("kicked off all the async functions. we are running.")
 
     shutdown_event = tornado.locks.Event()
 
