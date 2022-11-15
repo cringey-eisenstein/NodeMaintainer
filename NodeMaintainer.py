@@ -6,7 +6,8 @@
 # comprised of the host VM and many other hosts accessible via the public
 # internet.
 
-# Copyright (C) 2022  Cringey_Eisenstein
+# Authors: Cringey_Eisenstein,
+# last update: 11/15/2022
 # "nolite te bastardes carborundorum"
 
 # This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
